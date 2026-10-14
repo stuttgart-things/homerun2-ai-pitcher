@@ -37,6 +37,10 @@ type Config struct {
 	LLMRetryDelay time.Duration
 
 	// Ticker: short ASCII lines for the LED matrix, one message each.
+	// ModelDeny: substrings of model ids whose answers are rejected.
+	ModelDeny       []string
+	SummaryMinChars int
+
 	TickerEnabled  bool
 	TickerModel    string
 	TickerMax      int
@@ -75,6 +79,11 @@ func Load() (*Config, error) {
 		TickerSystem:      getEnv("TICKER_SYSTEM", "ai-ticker"),
 	}
 	c.TickerModel = getEnv("OPENROUTER_TICKER_MODEL", c.Model)
+	for _, d := range strings.Split(getEnv("OPENROUTER_MODEL_DENYLIST", "safety,guard"), ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			c.ModelDeny = append(c.ModelDeny, d)
+		}
+	}
 
 	ints := []struct {
 		env string
@@ -83,6 +92,7 @@ func Load() (*Config, error) {
 		dst *int
 	}{
 		{"LLM_RETRIES", "2", 0, &c.LLMRetries},
+		{"SUMMARY_MIN_CHARS", "80", 0, &c.SummaryMinChars},
 		{"TICKER_MAX", "4", 1, &c.TickerMax},
 		{"TICKER_MAX_CHARS", "40", 10, &c.TickerMaxChars},
 	}

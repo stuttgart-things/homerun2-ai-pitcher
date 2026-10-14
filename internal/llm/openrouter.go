@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -21,7 +22,13 @@ type Client struct {
 	// openrouter/free often routes to one, and 600 tokens left it ~200
 	// characters of answer, cut mid-sentence.
 	MaxTokens int
-	HTTP      *http.Client
+	// Deny: substrings of model ids whose answer counts as a failure.
+	// openrouter/free also routes to classifiers (e.g.
+	// nvidia/nemotron-3.5-content-safety answered "User Safety: safe").
+	Deny []string
+	// MinChars: a shorter answer counts as a failure (0 = no minimum).
+	MinChars int
+	HTTP     *http.Client
 }
 
 // Result is the answer plus the model that actually produced it. With the
@@ -139,7 +146,19 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 	if model == "" {
 		model = c.Model
 	}
+	if len(models) > 1 && model != models[0] {
+		// OpenRouter does not say why; a single-model run shows the error.
+		slog.Warn("first model not used, OpenRouter fell back", "wanted", models[0], "got", model)
+	}
+	for _, d := range c.Deny {
+		if d != "" && strings.Contains(strings.ToLower(model), strings.ToLower(d)) {
+			return nil, fmt.Errorf("openrouter: answer from denied model %s (matches %q)", model, d)
+		}
+	}
 	res := &Result{Text: strings.TrimSpace(cr.Choices[0].Message.Content), Model: model}
+	if c.MinChars > 0 && len([]rune(res.Text)) < c.MinChars {
+		return nil, fmt.Errorf("openrouter: answer from %s too short (%d < %d chars): %q", model, len([]rune(res.Text)), c.MinChars, truncate(res.Text, 60))
+	}
 	if cr.Choices[0].FinishReason == "length" {
 		res.Truncated = true
 		res.Text = lastSentence(res.Text)

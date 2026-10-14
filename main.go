@@ -45,20 +45,22 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), runBudget(cfg))
 	defer cancel()
 
-	client := func(model string) llm.Completer {
+	client := func(model string, minChars int) llm.Completer {
 		return &llm.Retrying{
 			Next: &llm.Client{
 				BaseURL:   cfg.OpenRouterBaseURL,
 				APIKey:    cfg.OpenRouterAPIKey,
 				Model:     model,
 				MaxTokens: cfg.MaxTokens,
+				Deny:      cfg.ModelDeny,
+				MinChars:  minChars,
 				HTTP:      &http.Client{Timeout: cfg.LLMTimeout},
 			},
 			Attempts: cfg.LLMRetries + 1,
 			Delay:    cfg.LLMRetryDelay,
 		}
 	}
-	out, err := Run(ctx, cfg, sources.NewClient(), client(cfg.Model), client(cfg.TickerModel))
+	out, err := Run(ctx, cfg, sources.NewClient(), client(cfg.Model, cfg.SummaryMinChars), client(cfg.TickerModel, 0))
 	if err != nil {
 		slog.Error("run failed", "error", err)
 		os.Exit(1)

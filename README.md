@@ -109,6 +109,8 @@ displayRules:
 | `LLM_TIMEOUT` | `90s` | timeout of the model call |
 | `LLM_MAX_TOKENS` | `4000` | token cap of the answer **including a reasoning model's thinking** (`reasoning.effort: low`, thinking excluded from the answer). An answer cut by the cap is trimmed to its last full sentence and marked |
 | `SUMMARY_LANGUAGE` | `German` | language of the AI text |
+| `OPENROUTER_MODEL_DENYLIST` | `safety,guard` | substrings of model ids whose answers are rejected (and retried): `openrouter/free` also routes to classifiers such as `nvidia/nemotron-3.5-content-safety`, which answers `User Safety: safe` |
+| `SUMMARY_MIN_CHARS` | `80` | a shorter summary counts as a failed call (`0` = off) |
 | `LLM_RETRIES` | `2` | more tries after a failed model call (HTTP error, empty or cut-off answer); back-off `LLM_RETRY_DELAY` (`5s`), doubled each time. A missing key is not retried |
 | `TICKER_ENABLED` | `true` | also pitch short ticker lines for the LED matrix |
 | `OPENROUTER_TICKER_MODEL` | `OPENROUTER_MODEL` | model for the ticker lines |

@@ -159,3 +159,19 @@ func TestCompleteSingleModelSendsNoList(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCompleteRejectsDeniedModelAndShortAnswers(t *testing.T) {
+	// The fourth real run: the fallback list ended in openrouter/free, which
+	// routed to a safety classifier.
+	srv := server(t, 200, `{"model":"nvidia/nemotron-3.5-content-safety:free","choices":[{"message":{"content":"User Safety: safe"}}]}`, nil)
+
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "m", HTTP: srv.Client(), Deny: []string{"safety", "guard"}}
+	if _, err := c.Complete(context.Background(), "s", "u"); err == nil || !strings.Contains(err.Error(), "denied model") {
+		t.Errorf("err = %v, want denied model", err)
+	}
+
+	c = &Client{BaseURL: srv.URL, APIKey: "key", Model: "m", HTTP: srv.Client(), MinChars: 80}
+	if _, err := c.Complete(context.Background(), "s", "u"); err == nil || !strings.Contains(err.Error(), "too short (17 < 80") {
+		t.Errorf("err = %v, want too short", err)
+	}
+}

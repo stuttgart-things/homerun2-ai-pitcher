@@ -125,7 +125,7 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openrouter: HTTP %d: %s", resp.StatusCode, truncate(string(raw), 300))
+		return nil, fmt.Errorf("openrouter: HTTP %d: %s", resp.StatusCode, errorText(raw))
 	}
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
@@ -167,6 +167,34 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 		}
 	}
 	return res, nil
+}
+
+// errorText makes OpenRouter's error JSON readable: the upstream message
+// (error.metadata.raw) if there is one, else error.message, else the raw
+// body. It ends up in the pitched fallback, so no JSON.
+func errorText(raw []byte) string {
+	var e struct {
+		Error struct {
+			Message  string `json:"message"`
+			Metadata struct {
+				Raw          string `json:"raw"`
+				ProviderName string `json:"provider_name"`
+			} `json:"metadata"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) == nil {
+		msg := e.Error.Metadata.Raw
+		if msg == "" {
+			msg = e.Error.Message
+		}
+		if msg != "" {
+			if p := e.Error.Metadata.ProviderName; p != "" {
+				msg += " (" + p + ")"
+			}
+			return truncate(msg, 200)
+		}
+	}
+	return truncate(string(raw), 200)
 }
 
 // splitModels turns "a, b,c" into [a b c]; one model stays one.

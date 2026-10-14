@@ -175,3 +175,18 @@ func TestCompleteRejectsDeniedModelAndShortAnswers(t *testing.T) {
 		t.Errorf("err = %v, want too short", err)
 	}
 }
+
+func TestErrorTextUsesUpstreamMessage(t *testing.T) {
+	// The fifth real run, verbatim apart from the cut.
+	body := `{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly.","provider_name":"Google AI Studio","is_byok":false}}}`
+	srv := server(t, 429, body, nil)
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "m", HTTP: srv.Client()}
+	_, err := c.Complete(context.Background(), "s", "u")
+	want := "openrouter: HTTP 429: google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly. (Google AI Studio)"
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v\nwant  %s", err, want)
+	}
+	if got := errorText([]byte("<html>bad gateway</html>")); got != "<html>bad gateway</html>" {
+		t.Errorf("non-JSON body = %q", got)
+	}
+}

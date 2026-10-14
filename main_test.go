@@ -81,6 +81,7 @@ func testConfig(url string) *config.Config {
 		ScoutURL: url, ScoutToken: "scout-token", DigestSchedule: "daily",
 		FindingsURL: url, FindingsToken: "sp-token", MaxFindings: 20,
 		Language: "German", System: "ai-digest", Author: "homerun2-ai-pitcher",
+		TickerEnabled: true, TickerMax: 4, TickerMaxChars: 40, TickerSystem: "ai-ticker",
 	}
 }
 
@@ -88,7 +89,8 @@ func TestRunWithAI(t *testing.T) {
 	srv := fakes(t, http.StatusOK)
 	ai := &fakeAI{text: "Heute ist ein Token in 5 Tagen fällig; Patrick ist dran."}
 
-	msg, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), ai)
+	out, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), ai, &fakeAI{err: context.Canceled})
+	msg := out.Summary
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +128,8 @@ func TestRunFailOpenWithoutAI(t *testing.T) {
 	srv := fakes(t, http.StatusOK)
 	ai := &fakeAI{err: context.DeadlineExceeded}
 
-	msg, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), ai)
+	out, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), ai, &fakeAI{err: context.Canceled})
+	msg := out.Summary
 	if err != nil {
 		t.Fatalf("a failing model must not fail the run: %v", err)
 	}
@@ -143,7 +146,8 @@ func TestRunFindingsUnavailable(t *testing.T) {
 	srv := fakes(t, http.StatusServiceUnavailable)
 	ai := &fakeAI{text: "ok"}
 
-	msg, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), ai)
+	out, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), ai, &fakeAI{err: context.Canceled})
+	msg := out.Summary
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +165,7 @@ func TestRunWithoutFindingsURL(t *testing.T) {
 	cfg.FindingsURL = ""
 	ai := &fakeAI{text: "ok"}
 
-	if _, err := Run(context.Background(), cfg, sources.NewClient(), ai); err != nil {
+	if _, err := Run(context.Background(), cfg, sources.NewClient(), ai, ai); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(ai.gotUser, "unknown") {
@@ -174,7 +178,77 @@ func TestRunDigestMissingIsFatal(t *testing.T) {
 	cfg := testConfig(srv.URL)
 	cfg.ScoutToken = "wrong"
 
-	if _, err := Run(context.Background(), cfg, sources.NewClient(), &fakeAI{text: "x"}); err == nil {
+	if _, err := Run(context.Background(), cfg, sources.NewClient(), &fakeAI{text: "x"}, &fakeAI{text: "x"}); err == nil {
 		t.Fatal("without scout's digest there is nothing to summarise; want an error")
+	}
+}
+
+func TestRunTickers(t *testing.T) {
+	srv := fakes(t, http.StatusOK)
+	tick := &fakeAI{text: "1. 2 Tokens laufen ab, Backstage zuerst\n- 12 Meldungen, weniger Warnungen\n99 Deployments heute\n- Ärger? Keiner."}
+
+	out, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), &fakeAI{text: "ok"}, tick)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, m := range out.Tickers {
+		titles = append(titles, m.Title)
+		if m.System != "ai-ticker" || m.Severity != "info" || m.Tags != "ai,ticker" {
+			t.Errorf("ticker message = %+v", m)
+		}
+		if !strings.Contains(m.Message, "AI-generated ticker (model meta-llama/some-free-model:free)") {
+			t.Errorf("ticker not marked: %q", m.Message)
+		}
+	}
+	// "2" is a count of the 2 findings, "12" is scout's total; "99" is made up.
+	want := []string{"2 Tokens laufen ab, Backstage zuerst", "12 Meldungen, weniger Warnungen", "Aerger? Keiner."}
+	if strings.Join(titles, "|") != strings.Join(want, "|") {
+		t.Errorf("tickers = %q, want %q", titles, want)
+	}
+	if !strings.Contains(tick.gotSystem, "at most 40 characters") {
+		t.Error("ticker prompt lacks the length limit")
+	}
+}
+
+func TestRunTickerFallback(t *testing.T) {
+	srv := fakes(t, http.StatusOK)
+	for name, tick := range map[string]*fakeAI{
+		"model fails":    {err: context.DeadlineExceeded},
+		"nothing usable": {text: "99 erfundene Dinge"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := Run(context.Background(), testConfig(srv.URL), sources.NewClient(), &fakeAI{text: "ok"}, tick)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out.Tickers) != 1 || out.Tickers[0].Title != "24h: 12 msgs 0 err 0 crit" || out.Tickers[0].Tags != "ticker,digest" {
+				t.Errorf("fallback tickers = %+v", out.Tickers)
+			}
+		})
+	}
+}
+
+func TestRunTickerDisabled(t *testing.T) {
+	srv := fakes(t, http.StatusOK)
+	cfg := testConfig(srv.URL)
+	cfg.TickerEnabled = false
+	tick := &fakeAI{text: "x"}
+
+	out, err := Run(context.Background(), cfg, sources.NewClient(), &fakeAI{text: "ok"}, tick)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Tickers) != 0 || tick.gotSystem != "" {
+		t.Errorf("tickers disabled but got %+v", out.Tickers)
+	}
+}
+
+func TestRunBudget(t *testing.T) {
+	cfg := &config.Config{LLMRetries: 2, LLMTimeout: 90 * time.Second, LLMRetryDelay: 5 * time.Second,
+		TickerEnabled: true, TickerMax: 4, TickerDelay: 3 * time.Second}
+	// per call 3*90s + 5s + 10s = 285s; two calls 570s; tickers 12s; +120s
+	if got, want := runBudget(cfg), 702*time.Second; got != want {
+		t.Errorf("runBudget = %v, want %v", got, want)
 	}
 }

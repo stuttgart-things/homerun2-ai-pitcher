@@ -29,7 +29,24 @@ type Config struct {
 	OpenRouterAPIKey  string
 	Model             string
 	LLMTimeout        time.Duration
+	MaxTokens         int
 	Language          string
+	// LLMRetries more tries after a failed model call, LLMRetryDelay before
+	// the first of them (doubled after each).
+	LLMRetries    int
+	LLMRetryDelay time.Duration
+
+	// Ticker: short ASCII lines for the LED matrix, one message each.
+	// ModelDeny: substrings of model ids whose answers are rejected.
+	ModelDeny       []string
+	SummaryMinChars int
+
+	TickerEnabled  bool
+	TickerModel    string
+	TickerMax      int
+	TickerMaxChars int
+	TickerSystem   string
+	TickerDelay    time.Duration
 
 	// omni-pitcher: where the result goes (POST <PitcherURL>/pitch).
 	PitcherURL   string
@@ -58,6 +75,48 @@ func Load() (*Config, error) {
 		System:            getEnv("PITCH_SYSTEM", "ai-digest"),
 		Author:            getEnv("PITCH_AUTHOR", "homerun2-ai-pitcher"),
 		DryRun:            getEnv("DRY_RUN", "false") == "true",
+		TickerEnabled:     getEnv("TICKER_ENABLED", "true") == "true",
+		TickerSystem:      getEnv("TICKER_SYSTEM", "ai-ticker"),
+	}
+	c.TickerModel = getEnv("OPENROUTER_TICKER_MODEL", c.Model)
+	for _, d := range strings.Split(getEnv("OPENROUTER_MODEL_DENYLIST", "safety,guard"), ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			c.ModelDeny = append(c.ModelDeny, d)
+		}
+	}
+
+	ints := []struct {
+		env string
+		def string
+		min int
+		dst *int
+	}{
+		{"LLM_RETRIES", "2", 0, &c.LLMRetries},
+		{"SUMMARY_MIN_CHARS", "80", 0, &c.SummaryMinChars},
+		{"TICKER_MAX", "4", 1, &c.TickerMax},
+		{"TICKER_MAX_CHARS", "40", 10, &c.TickerMaxChars},
+	}
+	for _, i := range ints {
+		v, err := strconv.Atoi(getEnv(i.env, i.def))
+		if err != nil || v < i.min {
+			return nil, fmt.Errorf("invalid %s %q (want an integer >= %d)", i.env, os.Getenv(i.env), i.min)
+		}
+		*i.dst = v
+	}
+	durs := []struct {
+		env string
+		def string
+		dst *time.Duration
+	}{
+		{"LLM_RETRY_DELAY", "5s", &c.LLMRetryDelay},
+		{"TICKER_DELAY", "3s", &c.TickerDelay},
+	}
+	for _, d := range durs {
+		v, err := time.ParseDuration(getEnv(d.env, d.def))
+		if err != nil || v < 0 {
+			return nil, fmt.Errorf("invalid %s %q", d.env, os.Getenv(d.env))
+		}
+		*d.dst = v
 	}
 
 	n, err := strconv.Atoi(getEnv("MAX_FINDINGS", "20"))
@@ -65,6 +124,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid MAX_FINDINGS %q", os.Getenv("MAX_FINDINGS"))
 	}
 	c.MaxFindings = n
+
+	mt, err := strconv.Atoi(getEnv("LLM_MAX_TOKENS", "4000"))
+	if err != nil || mt <= 0 {
+		return nil, fmt.Errorf("invalid LLM_MAX_TOKENS %q", os.Getenv("LLM_MAX_TOKENS"))
+	}
+	c.MaxTokens = mt
 
 	d, err := time.ParseDuration(getEnv("LLM_TIMEOUT", "90s"))
 	if err != nil {

@@ -114,7 +114,7 @@ func Compose(in Input, aiText, model string, truncated bool, aiErr error, system
 	var b strings.Builder
 	title := "[AI] " + d.Message.Title
 	if aiText != "" {
-		b.WriteString(aiText)
+		b.WriteString(Tidy(aiText))
 		b.WriteString("\n\n---\n")
 		fmt.Fprintf(&b, "AI-generated summary (model %s) of the scout %s digest and %d open findings. The numbers below are scout's, not the model's.", model, d.Schedule, len(in.Findings))
 		if truncated {
@@ -154,6 +154,23 @@ func Compose(in Input, aiText, model string, truncated bool, aiErr error, system
 		System:   system,
 		Tags:     "ai,digest," + d.Schedule,
 	}
+}
+
+var typography = strings.NewReplacer(
+	"\u2010", "-", "\u2011", "-", "\u2012", "-", // hyphens, non-breaking hyphen
+	"\u00a0", " ", "\u202f", " ", "\u2009", " ", // no-break and thin spaces
+	"\u200b", "", // zero-width space
+)
+
+// Tidy normalises what models like to emit: non-breaking hyphens and spaces
+// (nemotron writes "Vault\u2011Tokens"), and markdown hard breaks (two
+// trailing spaces) at line ends. Umlauts and dashes stay.
+func Tidy(s string) string {
+	lines := strings.Split(typography.Replace(s), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " \t")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func truncate(s string, n int) string {

@@ -68,6 +68,7 @@ Open findings:
 | `OPENROUTER_MODEL` | `openrouter/free` | any OpenRouter model id; `openrouter/free` routes to an available free model |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible endpoint |
 | `LLM_TIMEOUT` | `90s` | timeout of the model call |
+| `LLM_MAX_TOKENS` | `4000` | token cap of the answer **including a reasoning model's thinking** (`reasoning.effort: low`, thinking excluded from the answer). An answer cut by the cap is trimmed to its last full sentence and marked |
 | `SUMMARY_LANGUAGE` | `German` | language of the AI text |
 | `PITCHER_URL` | (required unless dry run) | omni-pitcher base URL; `/pitch` is appended |
 | `PITCHER_TOKEN` | (required unless dry run) | omni-pitcher bearer token |

@@ -37,7 +37,8 @@ func SystemPrompt(language string) string {
 		"- Use ONLY facts from the input. Never invent systems, causes, numbers or links.",
 		"- Do not recompute or restate the statistics in detail; they are shown below your text anyway. Interpret them: what changed, what stands out.",
 		"- Order: what needs attention today first (critical/error findings, overdue reminders, long-open findings), then notable changes, then what is fine.",
-		"- Group findings that obviously belong together (same source, same token, same host) and say so.",
+		"- Group findings that belong together into ONE statement: same kind (e.g. several tokens or certificates), same source, same host, or due on the same date or within a few days of each other. Name the shared date and what to do, e.g. \"three Vault tokens expire on 2026-11-09; rotate them together\".",
+		"- Warnings with a due date are worth one sentence even when nothing is urgent, so they can be planned.",
 		"- Acknowledged findings: mention who is on it, do not escalate them.",
 		"- If nothing needs attention, say that in one sentence.",
 		"- 3 to 6 sentences, plain text, no headings, no markdown tables, no emojis.",
@@ -106,14 +107,18 @@ func UserPrompt(in Input, maxFindings int) (string, error) {
 
 // Compose builds the pitched message. aiText and model are empty when the AI
 // answer is missing; aiErr says why (shown, so a silent fallback is visible).
-func Compose(in Input, aiText, model string, aiErr error, system, author string) pitch.Message {
+func Compose(in Input, aiText, model string, truncated bool, aiErr error, system, author string) pitch.Message {
 	d := in.Digest
 	var b strings.Builder
 	title := "[AI] " + d.Message.Title
 	if aiText != "" {
 		b.WriteString(aiText)
 		b.WriteString("\n\n---\n")
-		fmt.Fprintf(&b, "AI-generated summary (model %s) of the scout %s digest and %d open findings. The numbers below are scout's, not the model's.\n\n", model, d.Schedule, len(in.Findings))
+		fmt.Fprintf(&b, "AI-generated summary (model %s) of the scout %s digest and %d open findings. The numbers below are scout's, not the model's.", model, d.Schedule, len(in.Findings))
+		if truncated {
+			b.WriteString(" The answer hit the token limit and was cut after its last complete sentence.")
+		}
+		b.WriteString("\n\n")
 	} else {
 		title = "[AI n/a] " + d.Message.Title
 		reason := "no answer"

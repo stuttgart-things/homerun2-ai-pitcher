@@ -29,6 +29,7 @@ type Config struct {
 	OpenRouterAPIKey  string
 	Model             string
 	LLMTimeout        time.Duration
+	MaxTokens         int
 	Language          string
 
 	// omni-pitcher: where the result goes (POST <PitcherURL>/pitch).
@@ -65,6 +66,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid MAX_FINDINGS %q", os.Getenv("MAX_FINDINGS"))
 	}
 	c.MaxFindings = n
+
+	mt, err := strconv.Atoi(getEnv("LLM_MAX_TOKENS", "4000"))
+	if err != nil || mt <= 0 {
+		return nil, fmt.Errorf("invalid LLM_MAX_TOKENS %q", os.Getenv("LLM_MAX_TOKENS"))
+	}
+	c.MaxTokens = mt
 
 	d, err := time.ParseDuration(getEnv("LLM_TIMEOUT", "90s"))
 	if err != nil {

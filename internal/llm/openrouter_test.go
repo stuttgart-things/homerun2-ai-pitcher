@@ -75,3 +75,60 @@ func TestCompleteWithoutKey(t *testing.T) {
 		t.Fatal("want an error without API key")
 	}
 }
+
+func TestCompleteSendsTokenLimitAndReasoning(t *testing.T) {
+	srv := server(t, 200, `{"choices":[{"finish_reason":"stop","message":{"content":"Ok."}}]}`,
+		func(_ *http.Request, req chatRequest) {
+			if req.MaxTokens != 4000 {
+				t.Errorf("max_tokens = %d, want the 4000 default", req.MaxTokens)
+			}
+			if req.Reasoning.Effort != "low" || !req.Reasoning.Exclude {
+				t.Errorf("reasoning = %+v", req.Reasoning)
+			}
+		})
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "m", HTTP: srv.Client()}
+	res, err := c.Complete(context.Background(), "s", "u")
+	if err != nil || res.Truncated {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestCompleteTruncatedIsCutToLastSentence(t *testing.T) {
+	// The first real run: nemotron spent the budget thinking, the answer
+	// stopped mid-word.
+	body := `{"model":"nvidia/nemotron:free","choices":[{"finish_reason":"length","message":{"content":"Kein Handlungsbedarf. Die Warnungen sind zurückgegangen (von 33 auf 6) und stattdessen viele Info"}}]}`
+	srv := server(t, 200, body, nil)
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "m", HTTP: srv.Client()}
+
+	res, err := c.Complete(context.Background(), "s", "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Truncated || res.Text != "Kein Handlungsbedarf." {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestCompleteTruncatedWithoutSentenceFails(t *testing.T) {
+	srv := server(t, 200, `{"choices":[{"finish_reason":"length","message":{"content":"Die Warnungen sind zurückgegangen und"}}]}`, nil)
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "m", HTTP: srv.Client()}
+
+	if _, err := c.Complete(context.Background(), "s", "u"); err == nil || !strings.Contains(err.Error(), "token limit") {
+		t.Errorf("err = %v, want the token-limit error (the run then falls back)", err)
+	}
+}
+
+func TestLastSentence(t *testing.T) {
+	cases := map[string]string{
+		"A. B":               "A.",
+		"Version 1.2 ist da": "",
+		"Fertig!":            "Fertig!",
+		"Eins.\nZwei":        "Eins.",
+		"keine Satzenden":    "",
+	}
+	for in, want := range cases {
+		if got := lastSentence(in); got != want {
+			t.Errorf("lastSentence(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

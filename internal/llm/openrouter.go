@@ -17,7 +17,11 @@ type Client struct {
 	BaseURL string
 	APIKey  string
 	Model   string
-	HTTP    *http.Client
+	// MaxTokens caps the answer INCLUDING a reasoning model's thinking:
+	// openrouter/free often routes to one, and 600 tokens left it ~200
+	// characters of answer, cut mid-sentence.
+	MaxTokens int
+	HTTP      *http.Client
 }
 
 // Result is the answer plus the model that actually produced it. With the
@@ -26,6 +30,9 @@ type Client struct {
 type Result struct {
 	Text  string
 	Model string
+	// Truncated: the model hit the token limit (finish_reason "length").
+	// Text is then cut back to its last complete sentence.
+	Truncated bool
 }
 
 type chatMessage struct {
@@ -33,17 +40,26 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+type reasoning struct {
+	Effort  string `json:"effort,omitempty"`
+	Exclude bool   `json:"exclude"`
+}
+
 type chatRequest struct {
 	Model       string        `json:"model"`
 	Messages    []chatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
 	MaxTokens   int           `json:"max_tokens"`
+	// Reasoning models think little and keep the thinking out of the
+	// answer; models without reasoning ignore it.
+	Reasoning reasoning `json:"reasoning"`
 }
 
 type chatResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
-		Message struct {
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
@@ -65,7 +81,8 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 			{Role: "user", Content: user},
 		},
 		Temperature: 0.2,
-		MaxTokens:   600,
+		MaxTokens:   c.maxTokens(),
+		Reasoning:   reasoning{Effort: "low", Exclude: true},
 	})
 	if err != nil {
 		return nil, err
@@ -106,7 +123,41 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 	if model == "" {
 		model = c.Model
 	}
-	return &Result{Text: strings.TrimSpace(cr.Choices[0].Message.Content), Model: model}, nil
+	res := &Result{Text: strings.TrimSpace(cr.Choices[0].Message.Content), Model: model}
+	if cr.Choices[0].FinishReason == "length" {
+		res.Truncated = true
+		res.Text = lastSentence(res.Text)
+		if res.Text == "" {
+			return nil, errors.New("openrouter: answer cut off by the token limit before a complete sentence")
+		}
+	}
+	return res, nil
+}
+
+func (c *Client) maxTokens() int {
+	if c.MaxTokens > 0 {
+		return c.MaxTokens
+	}
+	return 4000
+}
+
+// lastSentence cuts s after its last sentence end (. ! ? followed by space,
+// newline or the end), or returns "" if there is none.
+func lastSentence(s string) string {
+	end := -1
+	for i, r := range s {
+		if r != '.' && r != '!' && r != '?' {
+			continue
+		}
+		next := i + 1
+		if next == len(s) || s[next] == ' ' || s[next] == '\n' {
+			end = next
+		}
+	}
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(s[:end])
 }
 
 func truncate(s string, n int) string {

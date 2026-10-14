@@ -45,10 +45,11 @@ func main() {
 	defer cancel()
 
 	msg, err := Run(ctx, cfg, sources.NewClient(), &llm.Client{
-		BaseURL: cfg.OpenRouterBaseURL,
-		APIKey:  cfg.OpenRouterAPIKey,
-		Model:   cfg.Model,
-		HTTP:    &http.Client{Timeout: cfg.LLMTimeout},
+		BaseURL:   cfg.OpenRouterBaseURL,
+		APIKey:    cfg.OpenRouterAPIKey,
+		Model:     cfg.Model,
+		MaxTokens: cfg.MaxTokens,
+		HTTP:      &http.Client{Timeout: cfg.LLMTimeout},
 	})
 	if err != nil {
 		slog.Error("run failed", "error", err)
@@ -98,10 +99,10 @@ func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai Comple
 	res, aiErr := ai.Complete(ctx, summary.SystemPrompt(cfg.Language), user)
 	if aiErr != nil {
 		slog.Warn("AI summary unavailable, pitching the plain digest", "error", aiErr)
-		return summary.Compose(in, "", "", aiErr, cfg.System, cfg.Author), nil
+		return summary.Compose(in, "", "", false, aiErr, cfg.System, cfg.Author), nil
 	}
-	slog.Info("AI summary", "model", res.Model, "chars", len(res.Text))
-	return summary.Compose(in, res.Text, res.Model, nil, cfg.System, cfg.Author), nil
+	slog.Info("AI summary", "model", res.Model, "chars", len(res.Text), "truncated", res.Truncated)
+	return summary.Compose(in, res.Text, res.Model, res.Truncated, nil, cfg.System, cfg.Author), nil
 }
 
 func logLevel() slog.Level {

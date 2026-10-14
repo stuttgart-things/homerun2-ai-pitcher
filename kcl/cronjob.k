@@ -30,7 +30,9 @@ _env = [
     {name = "OPENROUTER_MODEL", value = config.model}
     {name = "SUMMARY_LANGUAGE", value = config.language}
     {name = "DIGEST_SCHEDULE", value = config.digestSchedule}
-] + [{name = k, value = v} for k, v in config.extraEnvVars]
+    {name = "LLM_RETRIES", value = str(config.retries)}
+    {name = "TICKER_ENABLED", value = "true" if config.tickerEnabled else "false"}
+] + ([{name = "OPENROUTER_TICKER_MODEL", value = config.tickerModel}] if config.tickerModel else []) + [{name = k, value = v} for k, v in config.extraEnvVars]
 
 cronJob = {
     apiVersion = "batch/v1"
@@ -49,7 +51,9 @@ cronJob = {
         failedJobsHistoryLimit = 3
         jobTemplate.spec = {
             backoffLimit = 1
-            activeDeadlineSeconds = 600
+            # Above the run's own budget with the defaults (~12 min: two model
+            # calls with 3 tries of 90 s each, back-off, ticker spacing).
+            activeDeadlineSeconds = 1200
             template = {
                 metadata.labels = labels.commonLabels
                 spec = {

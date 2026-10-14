@@ -69,10 +69,13 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// ErrNoAPIKey is returned without a request; retrying it is pointless.
+var ErrNoAPIKey = errors.New("no OPENROUTER_API_KEY")
+
 // Complete sends one system and one user message and returns the answer.
 func (c *Client) Complete(ctx context.Context, system, user string) (*Result, error) {
 	if c.APIKey == "" {
-		return nil, errors.New("no OPENROUTER_API_KEY")
+		return nil, ErrNoAPIKey
 	}
 	body, err := json.Marshal(chatRequest{
 		Model: c.Model,

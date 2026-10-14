@@ -31,6 +31,12 @@ schema AiPitcher:
     model: str = "openrouter/free"
     language: str = "German"
     digestSchedule: "daily" | "hourly" = "daily"
+    # More tries after a failed model call (free models fail often)
+    retries: int = 2
+    # Short ASCII lines for the LED matrix, one message each (system ai-ticker)
+    tickerEnabled: bool = True
+    # Model for the tickers; empty = the same as model
+    tickerModel: str = ""
 
     # Secret <name> (keys scout-token, schedule-pitcher-token, pitcher-token,
     # openrouter-api-key), emitted only when a value is given. In GitOps the
@@ -47,3 +53,4 @@ schema AiPitcher:
         name != "", "name must not be empty"
         namespace != "", "namespace must not be empty"
         schedule != "", "schedule must not be empty"
+        retries >= 0, "retries must be >= 0"

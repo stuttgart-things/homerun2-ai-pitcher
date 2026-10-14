@@ -17,8 +17,10 @@ into homerun2 through [omni-pitcher](https://github.com/stuttgart-things/homerun
 CronJob 07:45
   ├─ GET  scout            /analytics/digest?schedule=daily   (counts, previous window, top systems)
   ├─ GET  schedule-pitcher /api/findings?status=open          (optional: open + acknowledged findings)
-  ├─ POST openrouter       /chat/completions                  (model openrouter/free by default)
-  └─ POST omni-pitcher     /pitch                             (system ai-digest, severity info)
+  ├─ POST openrouter       /chat/completions                  (summary; model openrouter/free by default)
+  ├─ POST openrouter       /chat/completions                  (ticker lines for the LED matrix)
+  ├─ POST omni-pitcher     /pitch                             (summary: system ai-digest, severity info)
+  └─ POST omni-pitcher     /pitch  x up to 4                  (one per ticker line: system ai-ticker)
 ```
 
 ### Ground rules
@@ -54,6 +56,43 @@ Open findings:
 - ...
 ```
 
+## Ticker for the LED matrix
+
+Long text is useless on a 64x64 matrix. After the summary, a second model call asks for
+up to `TICKER_MAX` short lines (default 4 x 40 characters), and **each line is pitched as its
+own message** (`system: ai-ticker`, `tags: ai,ticker`, severity `info`), `TICKER_DELAY` apart:
+
+```
+3 Vault-Tokens laufen am 9.11. ab
+31 Meldungen, Warnungen deutlich weniger
+Keine Fehler, nichts kritisch
+```
+
+The lines are checked, not trusted:
+
+- folded to plain ASCII (`ä` → `ae`, `–` → `-`, emojis dropped), because the matrix BDF fonts
+  have no umlauts;
+- list markers and quotes stripped, cut at a word boundary, duplicates dropped;
+- **a line with a number that is not in the input is dropped.** Allowed are the numbers in
+  scout's digest and the findings, plus counts from 1 to the number of open findings, so
+  grouping ("3 Vault-Tokens") works but "42 neue PRs" does not.
+
+Without a usable line (model down, nothing passed the checks), the matrix gets scout's own
+digest title as the only line, tagged `ticker,digest` and not marked as AI.
+
+A matching led-catcher display rule:
+
+```yaml
+displayRules:
+  ai-ticker:
+    systems: [ai-ticker]
+    severity: [INFO]
+    kind: text
+    text: "{{ title }}"
+    font: 6x10.bdf
+    duration: 8
+```
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -70,6 +109,13 @@ Open findings:
 | `LLM_TIMEOUT` | `90s` | timeout of the model call |
 | `LLM_MAX_TOKENS` | `4000` | token cap of the answer **including a reasoning model's thinking** (`reasoning.effort: low`, thinking excluded from the answer). An answer cut by the cap is trimmed to its last full sentence and marked |
 | `SUMMARY_LANGUAGE` | `German` | language of the AI text |
+| `LLM_RETRIES` | `2` | more tries after a failed model call (HTTP error, empty or cut-off answer); back-off `LLM_RETRY_DELAY` (`5s`), doubled each time. A missing key is not retried |
+| `TICKER_ENABLED` | `true` | also pitch short ticker lines for the LED matrix |
+| `OPENROUTER_TICKER_MODEL` | `OPENROUTER_MODEL` | model for the ticker lines |
+| `TICKER_MAX` | `4` | at most this many ticker lines |
+| `TICKER_MAX_CHARS` | `40` | at most this many characters per line |
+| `TICKER_SYSTEM` | `ai-ticker` | `system` of the ticker messages |
+| `TICKER_DELAY` | `3s` | pause before each ticker pitch, so the matrix shows them one by one |
 | `PITCHER_URL` | (required unless dry run) | omni-pitcher base URL; `/pitch` is appended |
 | `PITCHER_TOKEN` | (required unless dry run) | omni-pitcher bearer token |
 | `PITCH_SYSTEM` | `ai-digest` | `system` of the pitched message |

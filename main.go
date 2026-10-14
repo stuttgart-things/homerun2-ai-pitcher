@@ -18,6 +18,7 @@ import (
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/pitch"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/sources"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/summary"
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/ticker"
 )
 
 var (
@@ -41,47 +42,71 @@ func main() {
 	}
 	slog.Info("starting", "version", version, "model", cfg.Model, "schedule", cfg.DigestSchedule, "dryRun", cfg.DryRun)
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.LLMTimeout+2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), runBudget(cfg))
 	defer cancel()
 
-	msg, err := Run(ctx, cfg, sources.NewClient(), &llm.Client{
-		BaseURL:   cfg.OpenRouterBaseURL,
-		APIKey:    cfg.OpenRouterAPIKey,
-		Model:     cfg.Model,
-		MaxTokens: cfg.MaxTokens,
-		HTTP:      &http.Client{Timeout: cfg.LLMTimeout},
-	})
+	client := func(model string) llm.Completer {
+		return &llm.Retrying{
+			Next: &llm.Client{
+				BaseURL:   cfg.OpenRouterBaseURL,
+				APIKey:    cfg.OpenRouterAPIKey,
+				Model:     model,
+				MaxTokens: cfg.MaxTokens,
+				HTTP:      &http.Client{Timeout: cfg.LLMTimeout},
+			},
+			Attempts: cfg.LLMRetries + 1,
+			Delay:    cfg.LLMRetryDelay,
+		}
+	}
+	out, err := Run(ctx, cfg, sources.NewClient(), client(cfg.Model), client(cfg.TickerModel))
 	if err != nil {
 		slog.Error("run failed", "error", err)
 		os.Exit(1)
 	}
 
 	if cfg.DryRun {
-		out, _ := json.MarshalIndent(msg, "", "  ")
-		fmt.Println(string(out))
+		b, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(b))
 		return
 	}
 	pc := &pitch.Client{URL: cfg.PitcherURL, Token: cfg.PitcherToken, HTTP: &http.Client{Timeout: 30 * time.Second}}
-	id, err := pc.Pitch(ctx, msg)
+	id, err := pc.Pitch(ctx, out.Summary)
 	if err != nil {
 		slog.Error("pitch failed", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("pitched", "objectId", id, "title", msg.Title)
+	slog.Info("pitched", "objectId", id, "title", out.Summary.Title)
+
+	// One message per ticker line, spaced so the matrix shows them one after
+	// the other instead of dropping a burst. A lost line is logged, not fatal.
+	for _, t := range out.Tickers {
+		select {
+		case <-ctx.Done():
+			slog.Error("tickers not pitched", "error", ctx.Err())
+			os.Exit(1)
+		case <-time.After(cfg.TickerDelay):
+		}
+		if id, err := pc.Pitch(ctx, t); err != nil {
+			slog.Error("ticker pitch failed", "title", t.Title, "error", err)
+		} else {
+			slog.Info("ticker pitched", "objectId", id, "title", t.Title)
+		}
+	}
 }
 
-// Completer is the part of the LLM client Run needs.
-type Completer interface {
-	Complete(ctx context.Context, system, user string) (*llm.Result, error)
+// Output is what one run pitches: the summary, then the ticker lines.
+type Output struct {
+	Summary pitch.Message   `json:"summary"`
+	Tickers []pitch.Message `json:"tickers,omitempty"`
 }
 
-// Run collects the inputs, asks the model and composes the message. Only a
-// missing digest is fatal: without scout's numbers there is nothing to
-// summarise. A failing schedule-pitcher or model degrades the message.
-func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai Completer) (pitch.Message, error) {
+// Run collects the inputs, asks the model(s) and composes the messages. Only
+// a missing digest is fatal: without scout's numbers there is nothing to
+// summarise. A failing schedule-pitcher or model degrades the messages.
+func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai, tickerAI llm.Completer) (Output, error) {
 	d, err := src.FetchDigest(ctx, cfg.ScoutURL, cfg.ScoutToken, cfg.DigestSchedule)
 	if err != nil {
-		return pitch.Message{}, err
+		return Output{}, err
 	}
 	in := summary.Input{Digest: d, Now: time.Now()}
 
@@ -94,15 +119,75 @@ func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai Comple
 
 	user, err := summary.UserPrompt(in, cfg.MaxFindings)
 	if err != nil {
-		return pitch.Message{}, err
+		return Output{}, err
 	}
+
+	var out Output
 	res, aiErr := ai.Complete(ctx, summary.SystemPrompt(cfg.Language), user)
 	if aiErr != nil {
 		slog.Warn("AI summary unavailable, pitching the plain digest", "error", aiErr)
-		return summary.Compose(in, "", "", false, aiErr, cfg.System, cfg.Author), nil
+		out.Summary = summary.Compose(in, "", "", false, aiErr, cfg.System, cfg.Author)
+	} else {
+		slog.Info("AI summary", "model", res.Model, "chars", len(res.Text), "truncated", res.Truncated)
+		out.Summary = summary.Compose(in, res.Text, res.Model, res.Truncated, nil, cfg.System, cfg.Author)
 	}
-	slog.Info("AI summary", "model", res.Model, "chars", len(res.Text), "truncated", res.Truncated)
-	return summary.Compose(in, res.Text, res.Model, res.Truncated, nil, cfg.System, cfg.Author), nil
+
+	if cfg.TickerEnabled {
+		out.Tickers = tickers(ctx, cfg, in, user, tickerAI)
+	}
+	return out, nil
+}
+
+// tickers asks for short lines and keeps the ones that pass ticker.Parse.
+// Without any, the matrix still gets scout's own digest title, unmarked as
+// AI because it is not.
+func tickers(ctx context.Context, cfg *config.Config, in summary.Input, user string, ai llm.Completer) []pitch.Message {
+	msg := func(line, note, tags string) pitch.Message {
+		return pitch.Message{
+			Title:    line,
+			Message:  line + "\n\n" + note,
+			Severity: "info",
+			Author:   cfg.Author,
+			System:   cfg.TickerSystem,
+			Tags:     tags,
+		}
+	}
+	fallback := func(why string) []pitch.Message {
+		slog.Warn("no AI ticker, using scout's digest title", "reason", why)
+		line := ticker.ASCII(in.Digest.Message.Title)
+		return []pitch.Message{msg(line, "scout "+in.Digest.Schedule+" digest (AI ticker not available)", "ticker,digest")}
+	}
+
+	res, err := ai.Complete(ctx, ticker.SystemPrompt(cfg.Language, cfg.TickerMax, cfg.TickerMaxChars), user)
+	if err != nil {
+		return fallback(err.Error())
+	}
+	lines := ticker.Parse(res.Text, cfg.TickerMax, cfg.TickerMaxChars, user+"\n"+in.Digest.Message.Message, len(in.Findings))
+	if len(lines) == 0 {
+		return fallback("no usable line in the answer")
+	}
+	slog.Info("AI ticker", "model", res.Model, "lines", len(lines))
+	var out []pitch.Message
+	for _, l := range lines {
+		out = append(out, msg(l, "AI-generated ticker (model "+res.Model+")", "ai,ticker"))
+	}
+	return out
+}
+
+// runBudget is the deadline of one run: two model calls (summary, ticker),
+// each with all its retries and back-off, the ticker spacing, and 2 min for
+// the HTTP calls around them.
+func runBudget(cfg *config.Config) time.Duration {
+	attempts := cfg.LLMRetries + 1
+	perCall := time.Duration(attempts) * cfg.LLMTimeout
+	for i, d := 1, cfg.LLMRetryDelay; i < attempts; i, d = i+1, d*2 {
+		perCall += d
+	}
+	calls := 1
+	if cfg.TickerEnabled {
+		calls = 2
+	}
+	return time.Duration(calls)*perCall + time.Duration(cfg.TickerMax)*cfg.TickerDelay + 2*time.Minute
 }
 
 func logLevel() slog.Level {

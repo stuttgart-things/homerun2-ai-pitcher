@@ -17,6 +17,9 @@ _opts = {
     model = option("config.model")
     language = option("config.language")
     digestSchedule = option("config.digestSchedule")
+    retries = option("config.retries")
+    tickerEnabled = option("config.tickerEnabled")
+    tickerModel = option("config.tickerModel")
     scoutToken = option("config.scoutToken")
     schedulePitcherToken = option("config.schedulePitcherToken")
     pitcherToken = option("config.pitcherToken")
@@ -49,6 +52,12 @@ config: schema.AiPitcher = schema.AiPitcher {
         language = _opts.language
     if _opts.digestSchedule:
         digestSchedule = _opts.digestSchedule
+    if _opts.retries != None:
+        retries = int(_opts.retries)
+    if _opts.tickerEnabled != None:
+        tickerEnabled = _opts.tickerEnabled in [True, "True", "true"]
+    if _opts.tickerModel:
+        tickerModel = _opts.tickerModel
     if _opts.scoutToken:
         scoutToken = _opts.scoutToken
     if _opts.schedulePitcherToken:

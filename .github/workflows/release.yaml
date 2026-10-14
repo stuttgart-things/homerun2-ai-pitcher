@@ -1,0 +1,23 @@
+---
+name: Release
+on:
+  workflow_run:
+    workflows: ["Build, Push & Scan Container Image"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-go-release.yaml@main
+    with:
+      runs-on: ubuntu-latest
+      stage-image: true
+      # No kustomize base yet: the prototype is deployed as a plain CronJob
+      # from the stuttgart-things repo. Add kcl/ + push-kustomize once the
+      # shape has settled (stuttgart-things/homerun-library#135).
+      push-kustomize: false
+    secrets: inherit # pragma: allowlist secret

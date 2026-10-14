@@ -1,0 +1,14 @@
+defaultBaseImage: cgr.dev/chainguard/static:latest
+builds:
+  - id: homerun2-ai-pitcher
+    main: .
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.version={{ if index .Env "VERSION" }}{{.Env.VERSION}}{{ else }}dev{{ end }}
+      - -X main.commit={{ if index .Env "COMMIT" }}{{.Env.COMMIT}}{{ else }}unknown{{ end }}
+      # The release and ko-build workflow templates export BUILD_DATE; DATE is
+      # kept for local builds.
+      - -X main.date={{ if index .Env "BUILD_DATE" }}{{.Env.BUILD_DATE}}{{ else }}{{ if index .Env "DATE" }}{{.Env.DATE}}{{ else }}unknown{{ end }}{{ end }}

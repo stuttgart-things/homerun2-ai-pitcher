@@ -87,7 +87,53 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 	if c.APIKey == "" {
 		return nil, ErrNoAPIKey
 	}
-	models := splitModels(c.Model)
+	// OpenRouter takes at most 3 models per request ("'models' array must
+	// have 3 items or fewer"); a longer list is tried in groups of 3.
+	var err error
+	for _, group := range groups(splitModels(c.Model), maxModelsPerRequest) {
+		var res *Result
+		res, err = c.completeGroup(ctx, group, system, user)
+		if err == nil {
+			return res, nil
+		}
+		var he *HTTPError
+		if errors.As(err, &he) && !he.Retryable() {
+			return nil, err // a bad request or key is bad for every group
+		}
+		slog.Warn("model group failed", "models", strings.Join(group, ","), "error", err)
+	}
+	return nil, err
+}
+
+const maxModelsPerRequest = 3
+
+func groups(models []string, n int) [][]string {
+	var out [][]string
+	for len(models) > n {
+		out = append(out, models[:n])
+		models = models[n:]
+	}
+	return append(out, models)
+}
+
+// HTTPError is a non-200 answer of OpenRouter.
+type HTTPError struct {
+	Status int
+	Text   string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("openrouter: HTTP %d: %s", e.Status, e.Text)
+}
+
+// Retryable: rate limits, timeouts and server errors may pass on the next
+// try; a malformed request (400), a bad key (401/403) or no credit (402)
+// will not.
+func (e *HTTPError) Retryable() bool {
+	return e.Status == http.StatusTooManyRequests || e.Status == http.StatusRequestTimeout || e.Status >= 500
+}
+
+func (c *Client) completeGroup(ctx context.Context, models []string, system, user string) (*Result, error) {
 	req0 := chatRequest{
 		Model: models[0],
 		Messages: []chatMessage{
@@ -125,7 +171,7 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openrouter: HTTP %d: %s", resp.StatusCode, errorText(raw))
+		return nil, &HTTPError{Status: resp.StatusCode, Text: errorText(raw)}
 	}
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {

@@ -55,3 +55,14 @@ func TestRetryingZeroAttemptsMeansOne(t *testing.T) {
 		t.Errorf("err=%v calls=%d", err, f.calls)
 	}
 }
+
+func TestRetryingSkipsPermanentHTTPErrors(t *testing.T) {
+	for status, wantCalls := range map[int]int{400: 1, 401: 1, 402: 1, 403: 1, 429: 3, 500: 3, 503: 3} {
+		f := &flaky{fails: 5, err: &HTTPError{Status: status}}
+		r := &Retrying{Next: f, Attempts: 3, Delay: time.Millisecond}
+		_, _ = r.Complete(context.Background(), "s", "u")
+		if f.calls != wantCalls {
+			t.Errorf("HTTP %d: %d calls, want %d", status, f.calls, wantCalls)
+		}
+	}
+}

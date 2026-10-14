@@ -104,14 +104,14 @@ displayRules:
 | `SCHEDULE_PITCHER_TOKEN` | | schedule-pitcher API bearer token |
 | `MAX_FINDINGS` | `20` | findings passed to the model (worst first) |
 | `OPENROUTER_API_KEY` | (empty = fallback) | OpenRouter API key |
-| `OPENROUTER_MODEL` | `openrouter/free` | an OpenRouter model id, or a **comma-separated list** tried in order (OpenRouter `models` fallback), e.g. `google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,openrouter/free`. `openrouter/free` alone may route to very small models (2.6B) that misread findings |
+| `OPENROUTER_MODEL` | `openrouter/free` | an OpenRouter model id, or a **comma-separated list** tried in order: OpenRouter's `models` fallback takes at most 3, so a longer list is sent in groups of 3, one after the other, e.g. `google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,openrouter/free`. `openrouter/free` alone may route to very small models (2.6B) that misread findings |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible endpoint |
 | `LLM_TIMEOUT` | `90s` | timeout of the model call |
 | `LLM_MAX_TOKENS` | `4000` | token cap of the answer **including a reasoning model's thinking** (`reasoning.effort: low`, thinking excluded from the answer). An answer cut by the cap is trimmed to its last full sentence and marked |
 | `SUMMARY_LANGUAGE` | `German` | language of the AI text |
 | `OPENROUTER_MODEL_DENYLIST` | `safety,guard` | substrings of model ids whose answers are rejected (and retried): `openrouter/free` also routes to classifiers such as `nvidia/nemotron-3.5-content-safety`, which answers `User Safety: safe` |
 | `SUMMARY_MIN_CHARS` | `80` | a shorter summary counts as a failed call (`0` = off) |
-| `LLM_RETRIES` | `2` | more tries after a failed model call (HTTP error, empty or cut-off answer); back-off `LLM_RETRY_DELAY` (`5s`), doubled each time. A missing key is not retried |
+| `LLM_RETRIES` | `2` | more tries after a failed model call (HTTP 429/5xx, network, empty, cut-off, too short or denied answer; 400/401/402/403 are not retried); back-off `LLM_RETRY_DELAY` (`5s`), doubled each time. A missing key is not retried |
 | `TICKER_ENABLED` | `true` | also pitch short ticker lines for the LED matrix |
 | `OPENROUTER_TICKER_MODEL` | `OPENROUTER_MODEL` | model for the ticker lines |
 | `TICKER_MAX` | `4` | at most this many ticker lines |

@@ -14,7 +14,8 @@ type Completer interface {
 
 // Retrying retries a Completer: openrouter/free answers from whatever free
 // model is available, and those fail (429, 5xx, empty or cut-off answers)
-// far more often than paid ones. A missing key is not retried.
+// far more often than paid ones. A missing key and HTTP errors that cannot
+// pass on a retry (400, 401, 402, 403) are not retried.
 type Retrying struct {
 	Next     Completer
 	Attempts int           // total tries, at least 1
@@ -32,7 +33,8 @@ func (r *Retrying) Complete(ctx context.Context, system, user string) (*Result, 
 		if err == nil {
 			return res, nil
 		}
-		if errors.Is(err, ErrNoAPIKey) || i == attempts {
+		var he *HTTPError
+		if errors.Is(err, ErrNoAPIKey) || (errors.As(err, &he) && !he.Retryable()) || i == attempts {
 			break
 		}
 		slog.Warn("AI call failed, retrying", "attempt", i, "of", attempts, "in", delay, "error", err)

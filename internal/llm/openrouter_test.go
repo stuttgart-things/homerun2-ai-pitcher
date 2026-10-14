@@ -190,3 +190,55 @@ func TestErrorTextUsesUpstreamMessage(t *testing.T) {
 		t.Errorf("non-JSON body = %q", got)
 	}
 }
+
+func TestCompleteSplitsLongModelListIntoGroupsOfThree(t *testing.T) {
+	// The sixth real run: five models in one request -> HTTP 400.
+	var seen [][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req chatRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		seen = append(seen, req.Models)
+		if len(req.Models) > 3 {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"error":{"message":"'models' array must have 3 items or fewer."}}`))
+			return
+		}
+		if req.Model == "a" { // first group: all rate-limited
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate-limited"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"` + req.Model + `","choices":[{"message":{"content":"Ok."}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "a,b,c,d,e", HTTP: srv.Client()}
+
+	res, err := c.Complete(context.Background(), "s", "u")
+	if err != nil || res.Model != "d" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if len(seen) != 2 || strings.Join(seen[0], ",") != "a,b,c" || strings.Join(seen[1], ",") != "d,e" {
+		t.Errorf("requests = %q, want [a b c] then [d e]", seen)
+	}
+}
+
+func TestCompleteStopsOnBadRequest(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "a,b,c,d", HTTP: srv.Client()}
+	if _, err := c.Complete(context.Background(), "s", "u"); err == nil || calls != 1 {
+		t.Errorf("err=%v calls=%d, want one call for a 400", err, calls)
+	}
+}
+
+func TestGroups(t *testing.T) {
+	got := groups([]string{"a", "b", "c", "d", "e", "f", "g"}, 3)
+	if len(got) != 3 || len(got[2]) != 1 {
+		t.Errorf("groups = %q", got)
+	}
+}

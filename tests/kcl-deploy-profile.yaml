@@ -1,0 +1,9 @@
+---
+# Release kustomize artefact: placeholder Secret values, replaced by the
+# consumer (Flux substitution, SOPS or ESO). The image is set to the released
+# tag by the release workflow (kustomize-image-key config.image).
+config.namespace: homerun2
+config.scoutToken: changeme
+config.schedulePitcherToken: changeme
+config.pitcherToken: changeme
+config.openrouterAPIKey: changeme # pragma: allowlist secret

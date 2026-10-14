@@ -80,16 +80,60 @@ Open findings:
 > `warning` up and `success`. An `info` message on `system: ai-digest` needs its own output
 > there.
 
-## Development
+## Run locally (env vars + go)
+
+Only Go and a kubeconfig for the cluster that runs homerun2 are needed. `DRY_RUN=true`
+prints the message instead of pitching it, so no omni-pitcher token is needed.
+
+```bash
+export KUBECONFIG=~/.kube/platform-sthings
+
+# 1. scout and schedule-pitcher on localhost
+kubectl -n homerun2 port-forward svc/homerun2-scout 18080:80 &
+kubectl -n homerun2 port-forward svc/homerun2-schedule-pitcher 18081:80 &
+
+# 2. their API tokens from the cluster, plus your OpenRouter key
+export SCOUT_URL=http://localhost:18080
+export SCOUT_TOKEN=$(kubectl -n homerun2 get secret homerun2-scout-token -o jsonpath='{.data.auth-token}' | base64 -d)
+export SCHEDULE_PITCHER_URL=http://localhost:18081
+export SCHEDULE_PITCHER_TOKEN=$(kubectl -n homerun2 get secret homerun2-schedule-pitcher-token -o jsonpath='{.data.auth-token}' | base64 -d)
+export OPENROUTER_API_KEY=sk-or-...        # leave unset to see the fail-open fallback
+# export OPENROUTER_MODEL=openrouter/free  # default
+export DRY_RUN=true
+
+# 3. run
+go run .
+```
+
+To really pitch, port-forward omni-pitcher as well and drop `DRY_RUN`:
+
+```bash
+kubectl -n homerun2 port-forward svc/homerun2-omni-pitcher 18082:80 &
+export PITCHER_URL=http://localhost:18082
+export PITCHER_TOKEN=$(kubectl -n homerun2 get secret homerun2-omni-pitcher-token -o jsonpath='{.data.auth-token}' | base64 -d)
+unset DRY_RUN
+go run .
+```
+
+Without a cluster, the tests run the whole flow against fake scout, schedule-pitcher and
+OpenRouter servers:
 
 ```bash
 go test ./...
 golangci-lint run ./...
+```
 
-# Dry run against a cluster (port-forward scout and schedule-pitcher first)
-SCOUT_URL=http://localhost:18080 SCOUT_TOKEN=... \
-SCHEDULE_PITCHER_URL=http://localhost:18081 SCHEDULE_PITCHER_TOKEN=... \
-OPENROUTER_API_KEY=... DRY_RUN=true go run .
+## Deployment
+
+`kcl/` renders a CronJob (default `45 7 * * *`, Europe/Berlin, non-root, read-only root
+filesystem, no service account token) and its Secret `homerun2-ai-pitcher` with the keys
+`scout-token`, `schedule-pitcher-token`, `pitcher-token` and `openrouter-api-key`. The
+schedule-pitcher and OpenRouter keys are optional: without them the run degrades instead of
+failing. Each release pushes the rendered base as `ghcr.io/stuttgart-things/homerun2-ai-pitcher-kustomize:<version>`,
+with placeholder secret values and the image set to the released tag.
+
+```bash
+kcl run kcl/main.k -D config.scoutToken=x -D config.pitcherToken=y
 ```
 
 The image is built with [ko](https://ko.build) (`.ko.yaml`, no Dockerfile) and released by

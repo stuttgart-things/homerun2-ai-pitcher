@@ -16,8 +16,9 @@ jobs:
     with:
       runs-on: ubuntu-latest
       stage-image: true
-      # No kustomize base yet: the prototype is deployed as a plain CronJob
-      # from the stuttgart-things repo. Add kcl/ + push-kustomize once the
-      # shape has settled (stuttgart-things/homerun-library#135).
-      push-kustomize: false
+      push-kustomize: true
+      kcl-source-dir: kcl
+      kcl-profile-file: tests/kcl-deploy-profile.yaml
+      kustomize-oci-repo: ghcr.io/stuttgart-things/homerun2-ai-pitcher-kustomize
+      kustomize-image-key: config.image
     secrets: inherit # pragma: allowlist secret

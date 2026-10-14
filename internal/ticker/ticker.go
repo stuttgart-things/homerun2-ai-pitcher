@@ -23,6 +23,7 @@ func SystemPrompt(language string, n, maxChars int) string {
 		fmt.Sprintf("- Output 1 to %d lines, one ticker per line, nothing else: no numbering, no bullets, no quotes, no empty lines.", n),
 		fmt.Sprintf("- Each line at most %d characters. Short words, no filler.", maxChars),
 		"- One fact per line. Most important first: critical/error findings, things due soon, then notable changes, then one calm line if all is fine.",
+		"- Each line is a headline with a verb, like a news ticker (\"Git-Pitcher meldet 35 Events\"), never a bare label and value (\"homerun2-git-pitcher 35\"). Shorten long system names (homerun2-git-pitcher -> Git-Pitcher).",
 		"- Group findings that belong together into one line (e.g. \"3 Vault tokens expire 2026-11-09\").",
 		"- Use ONLY numbers and names from the input. Never invent counts, dates or systems.",
 		"- Plain ASCII: no emojis, no special characters.",

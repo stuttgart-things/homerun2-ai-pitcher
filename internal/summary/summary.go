@@ -42,6 +42,7 @@ func SystemPrompt(language string) string {
 		"- Acknowledged findings: mention who is on it, do not escalate them.",
 		"- If nothing needs attention, say that in one sentence.",
 		"- 3 to 6 sentences, plain text, no headings, no markdown tables, no emojis.",
+		"- Direct, informal team tone: impersonal or informal address, never formal (in German: no \"Sie\").",
 		"- Write in " + language + ".",
 	}, "\n")
 }

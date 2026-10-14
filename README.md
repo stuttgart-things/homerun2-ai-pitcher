@@ -104,7 +104,7 @@ displayRules:
 | `SCHEDULE_PITCHER_TOKEN` | | schedule-pitcher API bearer token |
 | `MAX_FINDINGS` | `20` | findings passed to the model (worst first) |
 | `OPENROUTER_API_KEY` | (empty = fallback) | OpenRouter API key |
-| `OPENROUTER_MODEL` | `openrouter/free` | any OpenRouter model id; `openrouter/free` routes to an available free model |
+| `OPENROUTER_MODEL` | `openrouter/free` | an OpenRouter model id, or a **comma-separated list** tried in order (OpenRouter `models` fallback), e.g. `google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,openrouter/free`. `openrouter/free` alone may route to very small models (2.6B) that misread findings |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible endpoint |
 | `LLM_TIMEOUT` | `90s` | timeout of the model call |
 | `LLM_MAX_TOKENS` | `4000` | token cap of the answer **including a reasoning model's thinking** (`reasoning.effort: low`, thinking excluded from the answer). An answer cut by the cap is trimmed to its last full sentence and marked |

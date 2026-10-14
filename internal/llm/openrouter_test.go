@@ -132,3 +132,30 @@ func TestLastSentence(t *testing.T) {
 		}
 	}
 }
+
+func TestCompleteModelList(t *testing.T) {
+	srv := server(t, 200, `{"model":"b:free","choices":[{"message":{"content":"Ok."}}]}`,
+		func(_ *http.Request, req chatRequest) {
+			if req.Model != "a:free" || strings.Join(req.Models, "|") != "a:free|b:free|openrouter/free" {
+				t.Errorf("model=%q models=%q", req.Model, req.Models)
+			}
+		})
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "a:free, b:free,openrouter/free", HTTP: srv.Client()}
+	res, err := c.Complete(context.Background(), "s", "u")
+	if err != nil || res.Model != "b:free" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestCompleteSingleModelSendsNoList(t *testing.T) {
+	srv := server(t, 200, `{"choices":[{"message":{"content":"Ok."}}]}`,
+		func(_ *http.Request, req chatRequest) {
+			if req.Model != "openrouter/free" || req.Models != nil {
+				t.Errorf("model=%q models=%q", req.Model, req.Models)
+			}
+		})
+	c := &Client{BaseURL: srv.URL, APIKey: "key", Model: "openrouter/free", HTTP: srv.Client()}
+	if _, err := c.Complete(context.Background(), "s", "u"); err != nil {
+		t.Fatal(err)
+	}
+}

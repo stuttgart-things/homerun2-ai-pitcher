@@ -46,7 +46,10 @@ type reasoning struct {
 }
 
 type chatRequest struct {
-	Model       string        `json:"model"`
+	Model string `json:"model"`
+	// Models is OpenRouter's fallback list: tried in order when the one
+	// before fails or is unavailable.
+	Models      []string      `json:"models,omitempty"`
 	Messages    []chatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
 	MaxTokens   int           `json:"max_tokens"`
@@ -77,8 +80,9 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 	if c.APIKey == "" {
 		return nil, ErrNoAPIKey
 	}
-	body, err := json.Marshal(chatRequest{
-		Model: c.Model,
+	models := splitModels(c.Model)
+	req0 := chatRequest{
+		Model: models[0],
 		Messages: []chatMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
@@ -86,7 +90,11 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 		Temperature: 0.2,
 		MaxTokens:   c.maxTokens(),
 		Reasoning:   reasoning{Effort: "low", Exclude: true},
-	})
+	}
+	if len(models) > 1 {
+		req0.Models = models
+	}
+	body, err := json.Marshal(req0)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +127,13 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 	if cr.Error != nil {
 		return nil, fmt.Errorf("openrouter: %s", cr.Error.Message)
 	}
-	if len(cr.Choices) == 0 || strings.TrimSpace(cr.Choices[0].Message.Content) == "" {
-		return nil, errors.New("openrouter: empty answer")
+	if len(cr.Choices) == 0 {
+		return nil, fmt.Errorf("openrouter: empty answer (model %s, no choices)", cr.Model)
+	}
+	if strings.TrimSpace(cr.Choices[0].Message.Content) == "" {
+		// Seen with free reasoning models: the thinking used the budget or
+		// the model returned nothing (finish_reason length / stop / error).
+		return nil, fmt.Errorf("openrouter: empty answer (model %s, finish_reason %q)", cr.Model, cr.Choices[0].FinishReason)
 	}
 	model := cr.Model
 	if model == "" {
@@ -135,6 +148,20 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 		}
 	}
 	return res, nil
+}
+
+// splitModels turns "a, b,c" into [a b c]; one model stays one.
+func splitModels(m string) []string {
+	var out []string
+	for _, p := range strings.Split(m, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{m}
+	}
+	return out
 }
 
 func (c *Client) maxTokens() int {

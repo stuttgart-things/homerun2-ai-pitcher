@@ -39,6 +39,7 @@ func SystemPrompt(language string) string {
 		"- Order: what needs attention today first (critical/error findings, overdue reminders, long-open findings), then notable changes, then what is fine.",
 		"- Group findings that belong together into ONE statement: same kind (e.g. several tokens or certificates), same source, same host, or due on the same date or within a few days of each other. Name the shared date and what to do, e.g. \"three Vault tokens expire on 2026-11-09; rotate them together\".",
 		"- Warnings with a due date are worth one sentence even when nothing is urgent, so they can be planned.",
+		"- \"expires in N days\" means it is still valid: never call it expired, overdue or urgent. Only status, severity error/critical or an overdue reminder in the input make something urgent.",
 		"- Acknowledged findings: mention who is on it, do not escalate them.",
 		"- If nothing needs attention, say that in one sentence.",
 		"- 3 to 6 sentences, plain text, no headings, no markdown tables, no emojis.",

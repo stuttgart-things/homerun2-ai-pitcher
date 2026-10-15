@@ -43,8 +43,37 @@ func TestLoadBadSchedule(t *testing.T) {
 	t.Setenv("SCOUT_URL", "http://scout")
 	t.Setenv("SCOUT_TOKEN", "t")
 	t.Setenv("DRY_RUN", "true")
-	t.Setenv("DIGEST_SCHEDULE", "weekly")
+	t.Setenv("DIGEST_SCHEDULE", "monthly")
 	if _, err := Load(); err == nil {
-		t.Fatal("want an error for weekly")
+		t.Fatal("want an error for monthly")
+	}
+	t.Setenv("DIGEST_SCHEDULE", "weekly")
+	if _, err := Load(); err != nil {
+		t.Fatalf("weekly: %v", err)
+	}
+}
+
+func TestLoadMessages(t *testing.T) {
+	t.Setenv("SCOUT_URL", "http://scout")
+	t.Setenv("SCOUT_TOKEN", "t")
+	t.Setenv("DRY_RUN", "true")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.MessagesEnabled || !c.OutagesEnabled || c.MaxTitles != 5 ||
+		strings.Join(c.MessagesSystems, ",") != "homerun2-git-pitcher" ||
+		strings.Join(c.OutageExcludeSystems, ",") != "homerun2-git-pitcher,homerun2-schedule-pitcher" {
+		t.Errorf("defaults = %+v", c)
+	}
+
+	t.Setenv("MESSAGES_SYSTEMS", " a, ,b ")
+	t.Setenv("OUTAGES_ENABLED", "false")
+	t.Setenv("MAX_TITLES", "0")
+	if c, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.MessagesSystems, ",") != "a,b" || c.OutagesEnabled || c.MaxTitles != 0 {
+		t.Errorf("overrides = %+v", c)
 	}
 }

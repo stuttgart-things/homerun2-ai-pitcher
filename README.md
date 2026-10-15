@@ -1,7 +1,8 @@
 # homerun2-ai-pitcher
 
 homerun2 pitcher that turns the daily [scout](https://github.com/stuttgart-things/homerun2-scout)
-digest and the open findings of the
+digest, what happened in the same window (merged PRs, releases, outages: scout's messages) and
+the open findings of the
 [schedule-pitcher](https://github.com/stuttgart-things/homerun2-schedule-pitcher)
 into a short AI summary via [OpenRouter](https://openrouter.ai), and pitches it
 into homerun2 through [omni-pitcher](https://github.com/stuttgart-things/homerun2-omni-pitcher).
@@ -16,6 +17,7 @@ into homerun2 through [omni-pitcher](https://github.com/stuttgart-things/homerun
 ```
 CronJob 07:45
   ├─ GET  scout            /analytics/digest?schedule=daily   (counts, previous window, top systems)
+  ├─ GET  scout            /analytics/messages                (optional: git activity, alerts, outages; scout v0.12+)
   ├─ GET  schedule-pitcher /api/findings?status=open          (optional: open + acknowledged findings)
   ├─ POST openrouter       /chat/completions                  (summary; model openrouter/free by default)
   ├─ POST openrouter       /chat/completions                  (ticker lines for the LED matrix)
@@ -29,6 +31,12 @@ CronJob 07:45
   (`[AI] 24h: 20 msgs 0 err 0 crit`), and scout's digest text plus the findings list
   are appended verbatim under the AI text. The model only interprets: what needs
   attention, what changed, what belongs together.
+- **Counts are computed, not generated.** Merged PRs, releases, commits, failed workflow runs,
+  issues and outages (with start and duration) are counted by code from scout's messages, shown
+  under the digest as plain lines, and given to the model as exact numbers.
+- **Titles are data.** PR, issue, release and alert titles reach the model only as JSON values,
+  the prompt says never to follow instructions inside them, and a number that appears only in a
+  PR or issue title is not allowed on the ticker. Message texts never reach the model.
 - **The AI never decides severity or delivery.** Every message is `info`.
 - **Fail-open.** If OpenRouter is slow, down, rate-limited or no key is set, the run
   still pitches: title `[AI n/a] …`, the reason, and the plain digest. Only a missing
@@ -55,6 +63,33 @@ Open findings:
 - [warning] Vault token tekton-vault-labda (token-ci-packer-labda) expires in 25 days (2026-11-09)
 - ...
 ```
+
+## Activity: what happened in the window
+
+With scout v0.12+ (`/analytics/messages`), each run reads the messages of the digest's window:
+
+- **Git activity** of `MESSAGES_SYSTEMS` (default `homerun2-git-pitcher`), per repository: PRs
+  merged / opened / closed unmerged with up to `MAX_TITLES` merged titles, releases, pushes and
+  commits (from the push message text, which stays here), failed workflow runs, issues opened /
+  closed (once git-pitcher pitches `issues` events).
+- **Outages**: every system with an `error` or `critical` message, except `OUTAGE_EXCLUDE_SYSTEMS`
+  (default `homerun2-git-pitcher,homerun2-schedule-pitcher`: their errors are failed workflows and
+  findings). An alert is paired with the next non-alert message of the same system and title,
+  ignoring prefixes like `[FIRING:1]` / `[RESOLVED]`; without one it is `ongoing`.
+
+The pitched message gets the counts under scout's digest:
+
+```
+Git: 5 PRs merged, 2 opened, 2 releases, 14 commits, 1 failed workflow runs, 0 issues opened, 0 closed
+Releases: homerun2-scout v0.12.0, homerun2-ai-pitcher v0.3.0
+Outage: grafana - Vault unreachable (since 2026-10-14 10:00Z, 37 min)
+```
+
+An older scout answers 404: the run goes on, the prompt says the activity is unknown, and the
+message says why. **Privacy:** with the free OpenRouter models a provider may log prompts. Only
+titles go out (PRs, releases, issues, alerts), never message texts; narrow `MESSAGES_SYSTEMS`,
+set `OUTAGES_ENABLED=false`, or exclude logging providers in the OpenRouter account if that is too
+much.
 
 ## Ticker for the LED matrix
 
@@ -99,7 +134,12 @@ displayRules:
 |---|---|---|
 | `SCOUT_URL` | (required) | scout base URL, e.g. `http://homerun2-scout.homerun2.svc.cluster.local` |
 | `SCOUT_TOKEN` | (required) | scout API bearer token |
-| `DIGEST_SCHEDULE` | `daily` | `daily` or `hourly`: which scout digest window |
+| `DIGEST_SCHEDULE` | `daily` | `hourly`, `daily` or `weekly` (scout v0.12+, needs scout retention ≥ 8 days, 15 for the week before): which scout window |
+| `MESSAGES_ENABLED` | `true` | read the git activity from scout's `/analytics/messages` |
+| `MESSAGES_SYSTEMS` | `homerun2-git-pitcher` | systems whose messages count as git activity |
+| `OUTAGES_ENABLED` | `true` | pair error/critical messages into outages |
+| `OUTAGE_EXCLUDE_SYSTEMS` | `homerun2-git-pitcher,homerun2-schedule-pitcher` | systems whose errors are not outages |
+| `MAX_TITLES` | `5` | merged PR / opened issue titles per repository given to the model (`0` = counts only) |
 | `SCHEDULE_PITCHER_URL` | (empty = skip) | schedule-pitcher base URL |
 | `SCHEDULE_PITCHER_TOKEN` | | schedule-pitcher API bearer token |
 | `MAX_FINDINGS` | `20` | findings passed to the model (worst first) |

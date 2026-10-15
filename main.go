@@ -1,6 +1,7 @@
-// homerun2-ai-pitcher turns scout's digest and the schedule-pitcher's open
-// findings into a short AI summary (OpenRouter) and pitches it through
-// omni-pitcher. One run, one message: it is meant to run as a CronJob.
+// homerun2-ai-pitcher turns scout's digest, the messages of the same window
+// (git activity, outages) and the schedule-pitcher's open findings into a
+// short AI summary (OpenRouter) and pitches it through omni-pitcher. One run,
+// one message: it is meant to run as a CronJob.
 package main
 
 import (
@@ -10,9 +11,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/activity"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/config"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/llm"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/pitch"
@@ -104,13 +107,21 @@ type Output struct {
 
 // Run collects the inputs, asks the model(s) and composes the messages. Only
 // a missing digest is fatal: without scout's numbers there is nothing to
-// summarise. A failing schedule-pitcher or model degrades the messages.
+// summarise. Failing messages, schedule-pitcher or model degrade the
+// messages.
 func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai, tickerAI llm.Completer) (Output, error) {
 	d, err := src.FetchDigest(ctx, cfg.ScoutURL, cfg.ScoutToken, cfg.DigestSchedule)
 	if err != nil {
 		return Output{}, err
 	}
 	in := summary.Input{Digest: d, Now: time.Now()}
+
+	if cfg.MessagesEnabled || cfg.OutagesEnabled {
+		in.Activity, in.ActivityErr = collectActivity(ctx, cfg, src)
+		if in.ActivityErr != nil {
+			slog.Warn("activity unavailable", "error", in.ActivityErr)
+		}
+	}
 
 	if cfg.FindingsURL != "" {
 		in.Findings, in.FindingsErr = src.FetchOpenFindings(ctx, cfg.FindingsURL, cfg.FindingsToken)
@@ -140,6 +151,72 @@ func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai, ticke
 	return out, nil
 }
 
+// messagesLimit is the most messages scout's /analytics/messages returns.
+const messagesLimit = 500
+
+// collectActivity reads scout's messages of the digest's window: the git
+// activity of cfg.MessagesSystems, and outages of every system that had an
+// error or critical message, except cfg.OutageExcludeSystems (their errors
+// are findings or failed workflows, not outages). Message texts are read for
+// the commit counts but never reach the model.
+func collectActivity(ctx context.Context, cfg *config.Config, src *sources.Client) (*activity.Activity, error) {
+	a := &activity.Activity{}
+	var incomplete []string
+	note := func(m *sources.Messages, what string) {
+		switch {
+		case m.WindowIncomplete:
+			incomplete = append(incomplete, what+": scout's retention is shorter than the window")
+		case m.Truncated || m.Omitted > 0:
+			incomplete = append(incomplete, fmt.Sprintf("%s: only the newest %d of %d messages", what, len(m.Messages), m.Total))
+		}
+	}
+
+	if cfg.MessagesEnabled && len(cfg.MessagesSystems) > 0 {
+		m, err := src.FetchMessages(ctx, cfg.ScoutURL, cfg.ScoutToken, sources.MessageQuery{
+			Schedule: cfg.DigestSchedule, Systems: cfg.MessagesSystems, Limit: messagesLimit, Body: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		note(m, "git activity")
+		a.Repos, a.Totals = activity.Git(m.Messages, cfg.MaxTitles)
+	}
+
+	if cfg.OutagesEnabled {
+		alerts, err := src.FetchMessages(ctx, cfg.ScoutURL, cfg.ScoutToken, sources.MessageQuery{
+			Schedule: cfg.DigestSchedule, Severities: []string{"error", "critical"}, Limit: messagesLimit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var systems []string
+		for _, e := range alerts.Messages {
+			if !slices.Contains(cfg.OutageExcludeSystems, e.System) && !slices.Contains(systems, e.System) {
+				systems = append(systems, e.System)
+			}
+		}
+		if len(systems) > 0 {
+			// Every message of those systems: the alerts and what cleared them.
+			m, err := src.FetchMessages(ctx, cfg.ScoutURL, cfg.ScoutToken, sources.MessageQuery{
+				Schedule: cfg.DigestSchedule, Systems: systems, Limit: messagesLimit,
+			})
+			if err != nil {
+				return nil, err
+			}
+			note(m, "outages")
+			a.Outages = activity.Outages(m.Messages)
+			a.Totals.Outages = len(a.Outages)
+			for _, o := range a.Outages {
+				if o.Ongoing {
+					a.Totals.OngoingOutages++
+				}
+			}
+		}
+	}
+	a.Incomplete = strings.Join(incomplete, "; ")
+	return a, nil
+}
+
 // tickers asks for short lines and keeps the ones that pass ticker.Parse.
 // Without any, the matrix still gets scout's own digest title, unmarked as
 // AI because it is not.
@@ -164,7 +241,18 @@ func tickers(ctx context.Context, cfg *config.Config, in summary.Input, user str
 	if err != nil {
 		return fallback(err.Error())
 	}
-	lines := ticker.Parse(res.Text, cfg.TickerMax, cfg.TickerMaxChars, user+"\n"+in.Digest.Message.Message, len(in.Findings))
+	// The numbers a line may use: the input without the pull request and
+	// issue titles, so a number written into a title by anyone is not a fact.
+	facts := in
+	if in.Activity != nil {
+		a := in.Activity.WithoutTitles()
+		facts.Activity = &a
+	}
+	factsJSON, err := summary.UserPrompt(facts, cfg.MaxFindings)
+	if err != nil {
+		return fallback(err.Error())
+	}
+	lines := ticker.Parse(res.Text, cfg.TickerMax, cfg.TickerMaxChars, factsJSON+"\n"+in.Digest.Message.Message, len(in.Findings))
 	if len(lines) == 0 {
 		return fallback("no usable line in the answer")
 	}

@@ -13,6 +13,9 @@ import (
 
 // Config holds everything one run needs.
 type Config struct {
+	// Mode decides what the run summarises and the defaults below.
+	Mode Mode
+
 	// scout: the deterministic numbers (GET /analytics/digest).
 	ScoutURL       string
 	ScoutToken     string
@@ -70,10 +73,16 @@ type Config struct {
 
 // Load reads the environment and checks the required settings.
 func Load() (*Config, error) {
+	modeName := getEnv("MODE", "morning")
+	mode, ok := Modes[modeName]
+	if !ok {
+		return nil, fmt.Errorf("MODE must be one of %s, got %q", ModeNames(), modeName)
+	}
 	c := &Config{
+		Mode:              mode,
 		ScoutURL:          strings.TrimRight(getEnv("SCOUT_URL", ""), "/"),
 		ScoutToken:        getEnv("SCOUT_TOKEN", ""),
-		DigestSchedule:    getEnv("DIGEST_SCHEDULE", "daily"),
+		DigestSchedule:    getEnv("DIGEST_SCHEDULE", mode.DigestSchedule),
 		FindingsURL:       strings.TrimRight(getEnv("SCHEDULE_PITCHER_URL", ""), "/"),
 		FindingsToken:     getEnv("SCHEDULE_PITCHER_TOKEN", ""),
 		OpenRouterBaseURL: strings.TrimRight(getEnv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"), "/"),
@@ -82,13 +91,13 @@ func Load() (*Config, error) {
 		Language:          getEnv("SUMMARY_LANGUAGE", "German"),
 		PitcherURL:        strings.TrimRight(getEnv("PITCHER_URL", ""), "/"),
 		PitcherToken:      getEnv("PITCHER_TOKEN", ""),
-		System:            getEnv("PITCH_SYSTEM", "ai-digest"),
+		System:            getEnv("PITCH_SYSTEM", mode.System),
 		Author:            getEnv("PITCH_AUTHOR", "homerun2-ai-pitcher"),
 		DryRun:            getEnv("DRY_RUN", "false") == "true",
-		TickerEnabled:     getEnv("TICKER_ENABLED", "true") == "true",
+		TickerEnabled:     getEnv("TICKER_ENABLED", strconv.FormatBool(mode.Ticker)) == "true",
 		TickerSystem:      getEnv("TICKER_SYSTEM", "ai-ticker"),
-		MessagesEnabled:   getEnv("MESSAGES_ENABLED", "true") == "true",
-		OutagesEnabled:    getEnv("OUTAGES_ENABLED", "true") == "true",
+		MessagesEnabled:   getEnv("MESSAGES_ENABLED", strconv.FormatBool(mode.Activity)) == "true",
+		OutagesEnabled:    getEnv("OUTAGES_ENABLED", strconv.FormatBool(mode.Activity)) == "true",
 	}
 	c.MessagesSystems = splitList(getEnv("MESSAGES_SYSTEMS", "homerun2-git-pitcher"))
 	c.OutageExcludeSystems = splitList(getEnv("OUTAGE_EXCLUDE_SYSTEMS", "homerun2-git-pitcher,homerun2-schedule-pitcher"))

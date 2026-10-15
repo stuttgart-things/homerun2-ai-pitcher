@@ -64,7 +64,7 @@ func TestOutages(t *testing.T) {
 		msg(42, "grafana", "success", "[RESOLVED] Vault unreachable", ""),
 		msg(50, "kubernetes", "critical", "Node w1 NotReady", ""),
 		msg(60, "grafana", "error", "[FIRING:1] Vault unreachable", ""), // again, a new outage
-		msg(61, "msteams", "success", "Node w1 NotReady", ""),          // other system does not clear it
+		msg(61, "msteams", "success", "Node w1 NotReady", ""),           // other system does not clear it
 	}
 	out := Outages(msgs)
 	if len(out) != 3 {

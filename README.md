@@ -64,6 +64,23 @@ Open findings:
 - ...
 ```
 
+## Modes
+
+`MODE` picks what a run summarises and sets the defaults of the window, the pitched `system`,
+the ticker and the activity; an env var that is set still wins. Each mode runs as its own CronJob.
+
+| `MODE` | Typical schedule (Berlin) | Window | Focus | `system` | Ticker | Activity |
+|---|---|---|---|---|---|---|
+| `morning` (default) | 07:45 Mon–Fri | daily | needs attention today, what happened overnight | `ai-digest` | yes | yes |
+| `evening` | 18:45 Mon–Fri, before quiet hours | daily | what stays open, what is due tomorrow, what got done | `ai-evening` | no | yes |
+| `week-ahead` | Mon 07:50 | daily | findings due in the next 7 days, by date | `ai-week-ahead` | no | no |
+| `weekly` | Fri 15:00 | weekly (scout v0.12+) | releases, PRs, outages of the week vs. the week before | `ai-weekly` | yes | yes |
+
+The title says which run it is: `[AI] 24h: …` for morning (unchanged), `[AI evening] …`,
+`[AI week ahead] …`, `[AI weekly] 7d: …`; tags end in the mode (`ai,digest,daily,evening`).
+scout must exclude every pitched system from its digests:
+`DIGEST_EXCLUDE_SYSTEMS=ai-digest,ai-evening,ai-week-ahead,ai-weekly,ai-ticker`.
+
 ## Activity: what happened in the window
 
 With scout v0.12+ (`/analytics/messages`), each run reads the messages of the digest's window:
@@ -134,10 +151,11 @@ displayRules:
 |---|---|---|
 | `SCOUT_URL` | (required) | scout base URL, e.g. `http://homerun2-scout.homerun2.svc.cluster.local` |
 | `SCOUT_TOKEN` | (required) | scout API bearer token |
-| `DIGEST_SCHEDULE` | `daily` | `hourly`, `daily` or `weekly` (scout v0.12+, needs scout retention ≥ 8 days, 15 for the week before): which scout window |
-| `MESSAGES_ENABLED` | `true` | read the git activity from scout's `/analytics/messages` |
+| `MODE` | `morning` | `morning`, `evening`, `week-ahead` or `weekly`, see [Modes](#modes); sets the defaults of `DIGEST_SCHEDULE`, `PITCH_SYSTEM`, `TICKER_ENABLED`, `MESSAGES_ENABLED`, `OUTAGES_ENABLED` |
+| `DIGEST_SCHEDULE` | mode's | `hourly`, `daily` or `weekly` (scout v0.12+, needs scout retention ≥ 8 days, 15 for the week before): which scout window |
+| `MESSAGES_ENABLED` | mode's | read the git activity from scout's `/analytics/messages` |
 | `MESSAGES_SYSTEMS` | `homerun2-git-pitcher` | systems whose messages count as git activity |
-| `OUTAGES_ENABLED` | `true` | pair error/critical messages into outages |
+| `OUTAGES_ENABLED` | mode's | pair error/critical messages into outages |
 | `OUTAGE_EXCLUDE_SYSTEMS` | `homerun2-git-pitcher,homerun2-schedule-pitcher` | systems whose errors are not outages |
 | `MAX_TITLES` | `5` | merged PR / opened issue titles per repository given to the model (`0` = counts only) |
 | `SCHEDULE_PITCHER_URL` | (empty = skip) | schedule-pitcher base URL |
@@ -152,7 +170,7 @@ displayRules:
 | `OPENROUTER_MODEL_DENYLIST` | `safety,guard` | substrings of model ids whose answers are rejected (and retried): `openrouter/free` also routes to classifiers such as `nvidia/nemotron-3.5-content-safety`, which answers `User Safety: safe` |
 | `SUMMARY_MIN_CHARS` | `80` | a shorter summary counts as a failed call (`0` = off) |
 | `LLM_RETRIES` | `2` | more tries after a failed model call (HTTP 429/5xx, network, empty, cut-off, too short or denied answer; 400/401/402/403 are not retried); back-off `LLM_RETRY_DELAY` (`5s`), doubled each time. A missing key is not retried |
-| `TICKER_ENABLED` | `true` | also pitch short ticker lines for the LED matrix |
+| `TICKER_ENABLED` | mode's | also pitch short ticker lines for the LED matrix |
 | `OPENROUTER_TICKER_MODEL` | `OPENROUTER_MODEL` | model for the ticker lines |
 | `TICKER_MAX` | `4` | at most this many ticker lines |
 | `TICKER_MAX_CHARS` | `40` | at most this many characters per line |
@@ -160,7 +178,7 @@ displayRules:
 | `TICKER_DELAY` | `3s` | pause before each ticker pitch, so the matrix shows them one by one |
 | `PITCHER_URL` | (required unless dry run) | omni-pitcher base URL; `/pitch` is appended |
 | `PITCHER_TOKEN` | (required unless dry run) | omni-pitcher bearer token |
-| `PITCH_SYSTEM` | `ai-digest` | `system` of the pitched message |
+| `PITCH_SYSTEM` | mode's | `system` of the pitched message |
 | `PITCH_AUTHOR` | `homerun2-ai-pitcher` | `author` of the pitched message |
 | `DRY_RUN` | `false` | print the message as JSON instead of pitching it |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
@@ -223,6 +241,19 @@ with placeholder secret values and the image set to the released tag.
 
 ```bash
 kcl run kcl/main.k -D config.scoutToken=x -D config.pitcherToken=y
+```
+
+Without `config.runs` it renders one CronJob (`config.mode`, default `morning`, at
+`config.schedule`), as before. With `config.runs` it renders one CronJob per entry, all sharing
+the Secret; a morning run keeps the plain name `homerun2-ai-pitcher`, the others get
+`homerun2-ai-pitcher-<mode>` (or the entry's `name`):
+
+```bash
+kcl run kcl/main.k -D 'config.runs=[
+  {"mode":"morning","schedule":"45 7 * * 1-5"},
+  {"mode":"evening","schedule":"45 18 * * 1-5"},
+  {"mode":"week-ahead","schedule":"50 7 * * 1"},
+  {"mode":"weekly","schedule":"0 15 * * 5","extraEnvVars":{"TICKER_MAX":"3"}}]'
 ```
 
 The image is built with [ko](https://ko.build) (`.ko.yaml`, no Dockerfile) and released by

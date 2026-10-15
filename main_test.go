@@ -374,6 +374,46 @@ func TestRunActivityUnavailable(t *testing.T) {
 	}
 }
 
+func TestRunModes(t *testing.T) {
+	srv := fakes(t, http.StatusOK)
+	cases := []struct {
+		mode    config.Mode
+		title   string
+		tags    string
+		prompt  string
+		aiTitle string
+	}{
+		{config.Modes["morning"], "[AI] 24h: 12 msgs 0 err 0 crit", "ai,digest,daily,morning", "daily morning status summary", "[AI n/a] 24h"},
+		{config.Modes["evening"], "[AI evening] 24h: 12 msgs 0 err 0 crit", "ai,digest,daily,evening", "end-of-day summary", "[AI evening n/a] 24h"},
+		{config.Modes["week-ahead"], "[AI week ahead] 24h: 12 msgs 0 err 0 crit", "ai,digest,daily,week-ahead", "plan for the coming week", "[AI week ahead n/a] 24h"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode.Name, func(t *testing.T) {
+			cfg := testConfig(srv.URL)
+			cfg.Mode, cfg.TickerEnabled = tc.mode, false
+			ai := &fakeAI{text: "Alles ruhig."}
+			out, err := Run(context.Background(), cfg, sources.NewClient(), ai, ai)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Summary.Title != tc.title || out.Summary.Tags != tc.tags {
+				t.Errorf("title %q tags %q", out.Summary.Title, out.Summary.Tags)
+			}
+			if !strings.Contains(ai.gotSystem, tc.prompt) {
+				t.Errorf("system prompt is not the %s one:\n%s", tc.mode.Name, ai.gotSystem)
+			}
+			if tc.mode.Label != "" && !strings.Contains(out.Summary.Message, "AI-generated "+tc.mode.Label+" summary") {
+				t.Errorf("footer lacks the mode:\n%s", out.Summary.Message)
+			}
+
+			out, _ = Run(context.Background(), cfg, sources.NewClient(), &fakeAI{err: context.DeadlineExceeded}, ai)
+			if !strings.HasPrefix(out.Summary.Title, tc.aiTitle) {
+				t.Errorf("fallback title %q, want prefix %q", out.Summary.Title, tc.aiTitle)
+			}
+		})
+	}
+}
+
 func TestRunBudget(t *testing.T) {
 	cfg := &config.Config{LLMRetries: 2, LLMTimeout: 90 * time.Second, LLMRetryDelay: 5 * time.Second,
 		TickerEnabled: true, TickerMax: 4, TickerDelay: 3 * time.Second}

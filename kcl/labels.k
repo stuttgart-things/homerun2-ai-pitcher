@@ -9,6 +9,8 @@ _opts = {
     namespace = option("config.namespace")
     image = option("config.image")
     schedule = option("config.schedule")
+    mode = option("config.mode")
+    runs = option("config.runs")
     timeZone = option("config.timeZone")
     suspend = option("config.suspend")
     scoutURL = option("config.scoutURL")
@@ -36,6 +38,10 @@ config: schema.AiPitcher = schema.AiPitcher {
         image = _opts.image
     if _opts.schedule:
         schedule = _opts.schedule
+    if _opts.mode:
+        mode = _opts.mode
+    if _opts.runs:
+        runs = _opts.runs
     if _opts.timeZone:
         timeZone = _opts.timeZone
     if _opts.suspend:

@@ -1,7 +1,8 @@
 """
-CronJob: one run, one pitched message. Missing tokens are optional on
-purpose: without the OpenRouter key or the schedule-pitcher token the run
-degrades (plain digest, no findings) instead of failing to start.
+CronJobs: one run, one pitched message, one CronJob per entry of runs (or one
+for mode/schedule). Missing tokens are optional on purpose: without the
+OpenRouter key or the schedule-pitcher token the run degrades (plain digest,
+no findings) instead of failing to start.
 """
 
 import labels
@@ -29,57 +30,85 @@ _env = [
     _secretEnv("OPENROUTER_API_KEY", "openrouter-api-key", True)
     {name = "OPENROUTER_MODEL", value = config.model}
     {name = "SUMMARY_LANGUAGE", value = config.language}
-    {name = "DIGEST_SCHEDULE", value = config.digestSchedule}
     {name = "LLM_RETRIES", value = str(config.retries)}
-    {name = "TICKER_ENABLED", value = "true" if config.tickerEnabled else "false"}
-] + ([{name = "OPENROUTER_TICKER_MODEL", value = config.tickerModel}] if config.tickerModel else []) + [{name = k, value = v} for k, v in config.extraEnvVars]
+] + ([{name = "DIGEST_SCHEDULE", value = config.digestSchedule}] if config.digestSchedule else []) + ([{name = "TICKER_ENABLED", value = "true" if config.tickerEnabled else "false"}] if config.tickerEnabled in [True, False] else []) + ([{name = "OPENROUTER_TICKER_MODEL", value = config.tickerModel}] if config.tickerModel else []) + [{name = k, value = v} for k, v in config.extraEnvVars]
 
-cronJob = {
-    apiVersion = "batch/v1"
-    kind = "CronJob"
-    metadata = {
-        name = config.name
-        namespace = config.namespace
-        labels = labels.commonLabels
+# Without runs: one run of mode at schedule, as before runs existed.
+_runs = [{
+    name = r.name
+    mode = r.mode
+    schedule = r.schedule
+    suspend = r.suspend
+    extraEnvVars = r.extraEnvVars
+} for r in config.runs] or [{
+    name = ""
+    mode = config.mode
+    schedule = config.schedule
+    suspend = config.suspend
+    extraEnvVars = {}
+}]
+
+# morning keeps the plain name, so a consumer's patches on it still match.
+_jobName = lambda run: {str:} -> str {
+    run.name if run.name else (config.name if run.mode == "morning" else config.name + "-" + run.mode)
+}
+
+_cronJob = lambda run: {str:} -> {str:} {
+    _name = _jobName(run)
+    _labels = {
+        **labels.commonLabels
+        "app.kubernetes.io/instance" = _name
+        "homerun2.stuttgart-things.com/ai-mode" = run.mode
     }
-    spec = {
-        schedule = config.schedule
-        timeZone = config.timeZone
-        suspend = config.suspend
-        concurrencyPolicy = "Forbid"
-        successfulJobsHistoryLimit = 3
-        failedJobsHistoryLimit = 3
-        jobTemplate.spec = {
-            backoffLimit = 1
-            # Above the run's own budget with the defaults (~12 min: two model
-            # calls with 3 tries of 90 s each, back-off, ticker spacing).
-            activeDeadlineSeconds = 1200
-            template = {
-                metadata.labels = labels.commonLabels
-                spec = {
-                    restartPolicy = "Never"
-                    automountServiceAccountToken = False
-                    securityContext = {
-                        runAsNonRoot = True
-                        seccompProfile.type = "RuntimeDefault"
-                    }
-                    containers = [{
-                        name = config.name
-                        image = config.image
-                        imagePullPolicy = config.imagePullPolicy
-                        env = _env
-                        resources = {
-                            requests = {cpu = config.cpuRequest, memory = config.memoryRequest}
-                            limits = {cpu = config.cpuLimit, memory = config.memoryLimit}
-                        }
+    {
+        apiVersion = "batch/v1"
+        kind = "CronJob"
+        metadata = {
+            name = _name
+            namespace = config.namespace
+            labels = _labels
+        }
+        spec = {
+            schedule = run.schedule
+            timeZone = config.timeZone
+            suspend = run.suspend
+            concurrencyPolicy = "Forbid"
+            successfulJobsHistoryLimit = 3
+            failedJobsHistoryLimit = 3
+            jobTemplate.spec = {
+                backoffLimit = 1
+                # Above the run's own budget with the defaults (~12 min: two model
+                # calls with 3 tries of 90 s each, back-off, ticker spacing).
+                activeDeadlineSeconds = 1200
+                template = {
+                    metadata.labels = _labels
+                    spec = {
+                        restartPolicy = "Never"
+                        automountServiceAccountToken = False
                         securityContext = {
-                            allowPrivilegeEscalation = False
-                            readOnlyRootFilesystem = True
-                            capabilities.drop = ["ALL"]
+                            runAsNonRoot = True
+                            seccompProfile.type = "RuntimeDefault"
                         }
-                    }]
+                        containers = [{
+                            name = config.name
+                            image = config.image
+                            imagePullPolicy = config.imagePullPolicy
+                            env = [{name = "MODE", value = run.mode}] + _env + [{name = k, value = v} for k, v in run.extraEnvVars]
+                            resources = {
+                                requests = {cpu = config.cpuRequest, memory = config.memoryRequest}
+                                limits = {cpu = config.cpuLimit, memory = config.memoryLimit}
+                            }
+                            securityContext = {
+                                allowPrivilegeEscalation = False
+                                readOnlyRootFilesystem = True
+                                capabilities.drop = ["ALL"]
+                            }
+                        }]
+                    }
                 }
             }
         }
     }
 }
+
+cronJobs = [_cronJob(r) for r in _runs]

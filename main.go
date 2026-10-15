@@ -43,7 +43,7 @@ func main() {
 		slog.Error("config", "error", err)
 		os.Exit(2)
 	}
-	slog.Info("starting", "version", version, "model", cfg.Model, "schedule", cfg.DigestSchedule, "dryRun", cfg.DryRun)
+	slog.Info("starting", "version", version, "mode", cfg.Mode.Name, "model", cfg.Model, "schedule", cfg.DigestSchedule, "dryRun", cfg.DryRun)
 
 	ctx, cancel := context.WithTimeout(context.Background(), runBudget(cfg))
 	defer cancel()
@@ -114,7 +114,7 @@ func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai, ticke
 	if err != nil {
 		return Output{}, err
 	}
-	in := summary.Input{Digest: d, Now: time.Now()}
+	in := summary.Input{Digest: d, Now: time.Now(), Mode: cfg.Mode.Name, Label: cfg.Mode.Label}
 
 	if cfg.MessagesEnabled || cfg.OutagesEnabled {
 		in.Activity, in.ActivityErr = collectActivity(ctx, cfg, src)
@@ -136,7 +136,7 @@ func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai, ticke
 	}
 
 	var out Output
-	res, aiErr := ai.Complete(ctx, summary.SystemPrompt(cfg.Language), user)
+	res, aiErr := ai.Complete(ctx, summary.SystemPrompt(cfg.Language, cfg.Mode.Name), user)
 	if aiErr != nil {
 		slog.Warn("AI summary unavailable, pitching the plain digest", "error", aiErr)
 		out.Summary = summary.Compose(in, "", "", false, aiErr, cfg.System, cfg.Author)

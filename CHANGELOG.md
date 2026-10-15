@@ -1,3 +1,10 @@
+# [0.4.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.3.0...v0.4.0) (2026-10-15)
+
+
+### Features
+
+* MODE (morning, evening, week-ahead, weekly) and one CronJob per run ([8e32226](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/8e32226e60df2e0e8c4524428a7b9efce87046aa)), closes [#6](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/6)
+
 # [0.3.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.2.0...v0.3.0) (2026-10-15)
 
 

@@ -30,7 +30,7 @@ schema AiPitcher:
     # OpenRouter
     model: str = "openrouter/free"
     language: str = "German"
-    digestSchedule: "daily" | "hourly" = "daily"
+    digestSchedule: "daily" | "hourly" | "weekly" = "daily"
     # More tries after a failed model call (free models fail often)
     retries: int = 2
     # Short ASCII lines for the LED matrix, one message each (system ai-ticker)

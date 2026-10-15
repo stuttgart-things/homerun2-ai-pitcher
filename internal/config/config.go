@@ -18,6 +18,16 @@ type Config struct {
 	ScoutToken     string
 	DigestSchedule string
 
+	// scout's messages of the same window (GET /analytics/messages):
+	// git activity of MessagesSystems, and outages of every system but
+	// OutageExcludeSystems. Only titles reach the model, at most MaxTitles
+	// per list.
+	MessagesEnabled      bool
+	MessagesSystems      []string
+	OutagesEnabled       bool
+	OutageExcludeSystems []string
+	MaxTitles            int
+
 	// schedule-pitcher: open findings and reminders (GET /api/findings).
 	// Optional; without a URL the summary is built from the digest alone.
 	FindingsURL   string
@@ -77,13 +87,13 @@ func Load() (*Config, error) {
 		DryRun:            getEnv("DRY_RUN", "false") == "true",
 		TickerEnabled:     getEnv("TICKER_ENABLED", "true") == "true",
 		TickerSystem:      getEnv("TICKER_SYSTEM", "ai-ticker"),
+		MessagesEnabled:   getEnv("MESSAGES_ENABLED", "true") == "true",
+		OutagesEnabled:    getEnv("OUTAGES_ENABLED", "true") == "true",
 	}
+	c.MessagesSystems = splitList(getEnv("MESSAGES_SYSTEMS", "homerun2-git-pitcher"))
+	c.OutageExcludeSystems = splitList(getEnv("OUTAGE_EXCLUDE_SYSTEMS", "homerun2-git-pitcher,homerun2-schedule-pitcher"))
 	c.TickerModel = getEnv("OPENROUTER_TICKER_MODEL", c.Model)
-	for _, d := range strings.Split(getEnv("OPENROUTER_MODEL_DENYLIST", "safety,guard"), ",") {
-		if d = strings.TrimSpace(d); d != "" {
-			c.ModelDeny = append(c.ModelDeny, d)
-		}
-	}
+	c.ModelDeny = splitList(getEnv("OPENROUTER_MODEL_DENYLIST", "safety,guard"))
 
 	ints := []struct {
 		env string
@@ -95,6 +105,7 @@ func Load() (*Config, error) {
 		{"SUMMARY_MIN_CHARS", "80", 0, &c.SummaryMinChars},
 		{"TICKER_MAX", "4", 1, &c.TickerMax},
 		{"TICKER_MAX_CHARS", "40", 10, &c.TickerMaxChars},
+		{"MAX_TITLES", "5", 0, &c.MaxTitles},
 	}
 	for _, i := range ints {
 		v, err := strconv.Atoi(getEnv(i.env, i.def))
@@ -138,9 +149,9 @@ func Load() (*Config, error) {
 	c.LLMTimeout = d
 
 	switch c.DigestSchedule {
-	case "daily", "hourly":
+	case "daily", "hourly", "weekly":
 	default:
-		return nil, fmt.Errorf("DIGEST_SCHEDULE must be daily or hourly, got %q", c.DigestSchedule)
+		return nil, fmt.Errorf("DIGEST_SCHEDULE must be hourly, daily or weekly, got %q", c.DigestSchedule)
 	}
 
 	var missing []string
@@ -164,6 +175,17 @@ func Load() (*Config, error) {
 	// No OPENROUTER_API_KEY is not an error: the run is fail-open and pitches
 	// the plain digest, marked as such.
 	return c, nil
+}
+
+// splitList splits a comma-separated value, dropping empty items.
+func splitList(v string) []string {
+	var out []string
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func getEnv(key, def string) string {

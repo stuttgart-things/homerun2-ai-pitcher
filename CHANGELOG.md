@@ -1,3 +1,10 @@
+## [0.4.1](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.4.0...v0.4.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **release:** Release-Artefakt liefert alle vier Modi (config.runs) ([a4b39c7](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/a4b39c7343488a4a2165d385459279ebc4d355e8)), closes [#9](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/9)
+
 # [0.4.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.3.0...v0.4.0) (2026-10-15)
 
 

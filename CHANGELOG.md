@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.2.0...v0.3.0) (2026-10-15)
+
+
+### Features
+
+* git activity and outages from scout's messages ([71c7c4d](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/71c7c4d92f07567fd3354ec164b03df89481653e)), closes [#6](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/6)
+
 # [0.2.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.1.0...v0.2.0) (2026-10-14)
 
 

@@ -7,3 +7,14 @@ config.scoutToken: changeme
 config.schedulePitcherToken: changeme
 config.pitcherToken: changeme
 config.openrouterAPIKey: changeme # pragma: allowlist secret
+# One CronJob per mode (Europe/Berlin). morning keeps the name
+# homerun2-ai-pitcher, the others are homerun2-ai-pitcher-<mode>.
+config.runs:
+  - mode: morning
+    schedule: "45 7 * * 1-5"
+  - mode: evening
+    schedule: "45 18 * * 1-5"
+  - mode: week-ahead
+    schedule: "50 7 * * 1"
+  - mode: weekly
+    schedule: "0 15 * * 5"

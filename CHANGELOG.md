@@ -1,3 +1,10 @@
+# [0.5.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.4.1...v0.5.0) (2026-11-13)
+
+
+### Features
+
+* mode cluster-analysis -- Claude Code over all K8sGPT findings in S3 ([#14](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/14)) ([e3193d7](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/e3193d744fe4fa85f5012ac27f104c1c1a7cfc11)), closes [#12](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/12)
+
 ## [0.4.1](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.4.0...v0.4.1) (2026-10-15)
 
 

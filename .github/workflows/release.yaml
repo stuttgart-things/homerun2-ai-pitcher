@@ -52,7 +52,7 @@ jobs:
             echo "waiting for ${{ steps.v.outputs.base }} ($i/30)"; sleep 30
           done
           echo "::error::${{ steps.v.outputs.base }} not found -- run Build Claude Code Base Image"; exit 1
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - uses: ko-build/setup-ko@v0.9

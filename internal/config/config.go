@@ -16,6 +16,9 @@ type Config struct {
 	// Mode decides what the run summarises and the defaults below.
 	Mode Mode
 
+	// Analysis configures MODE=cluster-analysis.
+	Analysis Analysis
+
 	// scout: the deterministic numbers (GET /analytics/digest).
 	ScoutURL       string
 	ScoutToken     string
@@ -161,6 +164,13 @@ func Load() (*Config, error) {
 	case "daily", "hourly", "weekly":
 	default:
 		return nil, fmt.Errorf("DIGEST_SCHEDULE must be hourly, daily or weekly, got %q", c.DigestSchedule)
+	}
+
+	if c.Mode.Name == ClusterAnalysisMode {
+		if err := loadAnalysis(c); err != nil {
+			return nil, err
+		}
+		return c, nil
 	}
 
 	var missing []string

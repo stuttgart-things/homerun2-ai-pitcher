@@ -31,6 +31,9 @@ var Modes = map[string]Mode{
 	"week-ahead": {Name: "week-ahead", Label: "week ahead", DigestSchedule: "daily", System: "ai-week-ahead"},
 	// Friday afternoon: the week's releases, PRs and outages, against the week before.
 	"weekly": {Name: "weekly", Label: "weekly", DigestSchedule: "weekly", System: "ai-weekly", Ticker: true, Activity: true},
+	// Once a day: Claude Code over the K8sGPT findings of all clusters in S3
+	// (#12). Reads no scout; settings in Analysis.
+	ClusterAnalysisMode: {Name: ClusterAnalysisMode, Label: "cluster analysis", DigestSchedule: "daily", System: "ai-cluster-analysis"},
 }
 
 // ModeNames lists the modes, sorted.

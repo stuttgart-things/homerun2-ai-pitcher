@@ -40,12 +40,14 @@ _runs = [{
     schedule = r.schedule
     suspend = r.suspend
     extraEnvVars = r.extraEnvVars
+    envFromSecrets = r.envFromSecrets
 } for r in config.runs] or [{
     name = ""
     mode = config.mode
     schedule = config.schedule
     suspend = config.suspend
     extraEnvVars = {}
+    envFromSecrets = []
 }]
 
 # morning keeps the plain name, so a consumer's patches on it still match.
@@ -55,6 +57,9 @@ _jobName = lambda run: {str:} -> str {
 
 _cronJob = lambda run: {str:} -> {str:} {
     _name = _jobName(run)
+    # cluster-analysis runs `claude -p`: the -claude image variant (#13), a
+    # writable /tmp as HOME (read-only root), and time for the model.
+    _claude = run.mode == "cluster-analysis"
     _labels = {
         **labels.commonLabels
         "app.kubernetes.io/instance" = _name
@@ -79,7 +84,7 @@ _cronJob = lambda run: {str:} -> {str:} {
                 backoffLimit = 1
                 # Above the run's own budget with the defaults (~12 min: two model
                 # calls with 3 tries of 90 s each, back-off, ticker spacing).
-                activeDeadlineSeconds = 1200
+                activeDeadlineSeconds = 2400 if _claude else 1200
                 template = {
                     metadata.labels = _labels
                     spec = {
@@ -89,11 +94,14 @@ _cronJob = lambda run: {str:} -> {str:} {
                             runAsNonRoot = True
                             seccompProfile.type = "RuntimeDefault"
                         }
+                        volumes = [{name = "tmp", emptyDir = {}}] if _claude else []
                         containers = [{
                             name = config.name
-                            image = config.image
+                            image = config.image + "-claude" if _claude else config.image
                             imagePullPolicy = config.imagePullPolicy
-                            env = [{name = "MODE", value = run.mode}] + _env + [{name = k, value = v} for k, v in run.extraEnvVars]
+                            env = [{name = "MODE", value = run.mode}] + _env + ([{name = "HOME", value = "/tmp"}] if _claude else []) + [{name = k, value = v} for k, v in run.extraEnvVars]
+                            envFrom = [{secretRef.name = s} for s in run.envFromSecrets]
+                            volumeMounts = [{name = "tmp", mountPath = "/tmp"}] if _claude else []
                             resources = {
                                 requests = {cpu = config.cpuRequest, memory = config.memoryRequest}
                                 limits = {cpu = config.cpuLimit, memory = config.memoryLimit}

@@ -34,3 +34,30 @@ jobs:
     with:
       runs-on: ubuntu-latest
     secrets: inherit # pragma: allowlist secret
+
+  # The -claude variant (#13), so a broken base image fails the PR, not the
+  # release. Pushed as pr-<n>-claude.
+  build-pr-claude:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: ko-build/setup-ko@v0.9
+      - name: ko build on the Claude Code base
+        env:
+          KO_DOCKER_REPO: ghcr.io/stuttgart-things/homerun2-ai-pitcher
+        run: |
+          base="ghcr.io/stuttgart-things/homerun2-ai-pitcher-claude-base:$(sed -n 's/^ARG CLAUDE_CODE_VERSION=//p' images/claude-code/Dockerfile)"
+          if ! docker manifest inspect "$base" >/dev/null 2>&1; then
+            echo "::warning::$base does not exist yet (built on main by build-claude-base); skipping"
+            exit 0
+          fi
+          KO_DEFAULTBASEIMAGE="$base" VERSION="pr-${{ github.event.number }}" ko build --bare --tags "pr-${{ github.event.number }}-claude" .

@@ -22,3 +22,46 @@ jobs:
       kustomize-oci-repo: ghcr.io/stuttgart-things/homerun2-ai-pitcher-kustomize
       kustomize-image-key: config.image
     secrets: inherit # pragma: allowlist secret
+
+  # The -claude variant (#13): the same binary on the Claude Code base image,
+  # for MODE=cluster-analysis. Tagged <version>-claude next to the release.
+  release-claude:
+    name: Release -claude variant
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Version and base image
+        id: v
+        run: |
+          git fetch --tags
+          VERSION=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "base=ghcr.io/stuttgart-things/homerun2-ai-pitcher-claude-base:$(sed -n 's/^ARG CLAUDE_CODE_VERSION=//p' images/claude-code/Dockerfile)" >> "$GITHUB_OUTPUT"
+      - name: Wait for the base image
+        # build-claude-base pushes it on the same push to main when the
+        # Dockerfile changed; it can still be running.
+        run: |
+          for i in $(seq 1 30); do
+            docker manifest inspect "${{ steps.v.outputs.base }}" >/dev/null 2>&1 && exit 0
+            echo "waiting for ${{ steps.v.outputs.base }} ($i/30)"; sleep 30
+          done
+          echo "::error::${{ steps.v.outputs.base }} not found -- run Build Claude Code Base Image"; exit 1
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: ko-build/setup-ko@v0.9
+      - name: ko build on the Claude Code base
+        env:
+          KO_DOCKER_REPO: ghcr.io/stuttgart-things/homerun2-ai-pitcher
+          KO_DEFAULTBASEIMAGE: ${{ steps.v.outputs.base }}
+          VERSION: ${{ steps.v.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          export BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          ko build --bare --tags "${VERSION}-claude" .

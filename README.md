@@ -75,11 +75,64 @@ the ticker and the activity; an env var that is set still wins. Each mode runs a
 | `evening` | 18:45 Mon–Fri, before quiet hours | daily | what stays open, what is due tomorrow, what got done | `ai-evening` | no | yes |
 | `week-ahead` | Mon 07:50 | daily | findings due in the next 7 days, by date | `ai-week-ahead` | no | no |
 | `weekly` | Fri 15:00 | weekly (scout v0.12+) | releases, PRs, outages of the week vs. the week before | `ai-weekly` | yes | yes |
+| `cluster-analysis` | daily 07:30 | `LOOKBACK_DAYS` (7) | K8sGPT findings of all clusters from S3, by **Claude Code** — see below | `ai-cluster-analysis` | no | no |
 
 The title says which run it is: `[AI] 24h: …` for morning (unchanged), `[AI evening] …`,
 `[AI week ahead] …`, `[AI weekly] 7d: …`; tags end in the mode (`ai,digest,daily,evening`).
 scout must exclude every pitched system from its digests:
 `DIGEST_EXCLUDE_SYSTEMS=ai-digest,ai-evening,ai-week-ahead,ai-weekly,ai-ticker`.
+
+## Cluster analysis (`MODE=cluster-analysis`)
+
+Once a day, **Claude Code** assesses the K8sGPT findings of **all clusters**
+(#12, tracking stuttgart-things/stuttgart-things#4556). It reads no scout:
+its input is the S3 archive that homerun2-s3-catcher fills (bucket
+`k8s-cluster-report`, systems `k8sgpt-<cluster>`), and it acts on nothing.
+
+```
+k8s-cluster-report (read-only user)
+  └ per cluster: the latest snapshot + one per day of LOOKBACK_DAYS
+      → condensed input (deterministic): open findings with fingerprint,
+        first day seen, days present, recurring, new vs. the last report,
+        resolved since, the same error on several clusters, stale clusters
+          → claude -p (no tools, no MCP, no settings; --json-schema)
+              → summary + topics (fingerprints, clusters, assessment,
+                proposal, confidence, action: none|issue|pr-proposal)
+                  validated: unknown fingerprints/clusters dropped
+→ k8s-cluster-analysis: analysis/date=<day>/<run>.json + .md (writer user)
+→ one pitch, system ai-cluster-analysis, link REPORT_URL
+```
+
+- **Numbers and severity come from the input, never from the model**
+  (ground rules above): `warning` with new findings or a cluster without a
+  current snapshot, `success` with none open, else `info`.
+- **The model failing is not fatal:** the report carries the numbers and the
+  error, and the pitch says `[AI n/a]`.
+- **The previous report is the baseline** for new and resolved (its
+  `openFindings`). The first run marks nothing new.
+- The report's Markdown is rendered by this code, not by the model. The UI
+  of homerun2-s3-catcher shows it under *Analyses*.
+
+| Variable | Default | |
+|---|---|---|
+| `S3_ENDPOINT` | **required** | `host[:port]` |
+| `S3_USE_SSL` / `S3_INSECURE` / `S3_REGION` | `true` / `false` / `us-east-1` | |
+| `ARCHIVE_BUCKET`, `ARCHIVE_ACCESS_KEY`, `ARCHIVE_SECRET_KEY` | `k8s-cluster-report`, **required** | read-only user |
+| `REPORT_BUCKET`, `REPORT_ACCESS_KEY`, `REPORT_SECRET_KEY` | `k8s-cluster-analysis`, **required** | writer of the reports |
+| `ANALYSIS_SYSTEM_PREFIX` | `k8sgpt-` | archive prefix `system=<prefix><cluster>/` |
+| `LOOKBACK_DAYS` | `7` | days of snapshots per cluster |
+| `STALE_AFTER` | `3h` | snapshots come hourly |
+| `MAX_FINDINGS_PER_CLUSTER` | `50` | passed on per cluster (new and recurring first) |
+| `REPORT_URL` | — | link in the pitch, e.g. the portal's `/archive/?tab=analyses` |
+| `CLAUDE_BIN` / `CLAUDE_MODEL` | `claude` / `sonnet` | |
+| `CLAUDE_MAX_BUDGET_USD` | `2` | `--max-budget-usd` per call |
+| `CLAUDE_TIMEOUT` / `CLAUDE_ATTEMPTS` | `10m` / `2` | |
+| `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | **one required** | read by the CLI: a subscription token (`claude setup-token`) for testing, an API key for production |
+| `PITCHER_URL`, `PITCHER_TOKEN`, `PITCH_AUTHOR`, `SUMMARY_LANGUAGE`, `DRY_RUN` | as above | |
+
+Needs the `claude` CLI in the image: the `-claude` image variant (#13).
+`DRY_RUN=true` builds the report, calls the model and prints report and
+message without storing or pitching.
 
 ## Activity: what happened in the window
 

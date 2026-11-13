@@ -16,6 +16,9 @@ import (
 	"time"
 
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/activity"
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/archive"
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/claudecode"
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/clusteranalysis"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/config"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/llm"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/pitch"
@@ -42,6 +45,11 @@ func main() {
 	if err != nil {
 		slog.Error("config", "error", err)
 		os.Exit(2)
+	}
+	if cfg.Mode.Name == config.ClusterAnalysisMode {
+		slog.Info("starting", "version", version, "mode", cfg.Mode.Name, "model", cfg.Analysis.ClaudeModel,
+			"lookbackDays", cfg.Analysis.LookbackDays, "dryRun", cfg.DryRun)
+		os.Exit(runClusterAnalysis(cfg))
 	}
 	slog.Info("starting", "version", version, "mode", cfg.Mode.Name, "model", cfg.Model, "schedule", cfg.DigestSchedule, "dryRun", cfg.DryRun)
 
@@ -96,6 +104,87 @@ func main() {
 		} else {
 			slog.Info("ticker pitched", "objectId", id, "title", t.Title)
 		}
+	}
+}
+
+// runClusterAnalysis is MODE=cluster-analysis (#12): the K8sGPT findings of
+// all clusters from S3, Claude Code's assessment, the report back to S3 and
+// one pitch. Returns the exit code.
+func runClusterAnalysis(cfg *config.Config) int {
+	a := cfg.Analysis
+	ctx, cancel := context.WithTimeout(context.Background(), a.ClaudeTimeout*time.Duration(a.ClaudeAttempts)+5*time.Minute)
+	defer cancel()
+
+	open := func(bucket, key, secret string) *archive.Bucket {
+		b, err := archive.Open(archive.Options{Endpoint: a.Endpoint, Bucket: bucket, Region: a.Region,
+			AccessKey: key, SecretKey: secret, UseSSL: a.UseSSL, Insecure: a.Insecure})
+		if err != nil {
+			slog.Error("s3", "bucket", bucket, "error", err)
+			os.Exit(2)
+		}
+		return b
+	}
+	archiveB := open(a.ArchiveBucket, a.ArchiveKey, a.ArchiveSecret)
+	reportB := open(a.ReportBucket, a.ReportKey, a.ReportSecret)
+	ai := &claudecode.Runner{Bin: a.ClaudeBin, Model: a.ClaudeModel, MaxBudget: a.ClaudeBudget, Timeout: a.ClaudeTimeout}
+
+	res, err := clusteranalysis.Run(ctx, archiveB, reportB, ai, time.Now(), clusteranalysis.Config{
+		Options: clusteranalysis.Options{
+			SystemPrefix: a.SystemPrefix, LookbackDays: a.LookbackDays, StaleAfter: a.StaleAfter,
+			MaxFindingsPerClu: a.MaxPerCluster, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3,
+		},
+		Language: cfg.Language, DryRun: cfg.DryRun, Attempts: a.ClaudeAttempts,
+	})
+	if err != nil {
+		slog.Error("cluster analysis failed", "error", err)
+		return 1
+	}
+	r := res.Report
+	slog.Info("cluster analysis", "clusters", r.Stats.Clusters, "open", r.Stats.Open, "new", r.Stats.New,
+		"resolved", r.Stats.Resolved, "topics", len(r.Topics), "model", r.Model, "costUsd", r.CostUSD,
+		"assessmentError", r.AssessmentError, "report", res.JSONKey)
+
+	msg := clusterAnalysisMessage(cfg, r)
+	if cfg.DryRun {
+		fmt.Println(r.Markdown())
+		b, _ := json.MarshalIndent(msg, "", "  ")
+		fmt.Println(string(b))
+		return 0
+	}
+	pc := &pitch.Client{URL: cfg.PitcherURL, Token: cfg.PitcherToken, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	id, err := pc.Pitch(ctx, msg)
+	if err != nil {
+		slog.Error("pitch failed", "error", err)
+		return 1
+	}
+	slog.Info("pitched", "objectId", id, "title", msg.Title)
+	return 0
+}
+
+// clusterAnalysisMessage is the run's one message: the counts in the title,
+// the summary and the topic titles in the body, a link to the report.
+func clusterAnalysisMessage(cfg *config.Config, r *clusteranalysis.Report) pitch.Message {
+	var b strings.Builder
+	if r.Summary != "" {
+		b.WriteString(r.Summary + "\n")
+	}
+	if r.AssessmentError != "" {
+		b.WriteString("[AI n/a] numbers only\n")
+	}
+	for i, t := range r.Topics {
+		fmt.Fprintf(&b, "\n%d. %s (%s)", i+1, t.Title, strings.Join(t.Clusters, ", "))
+	}
+	if len(r.Stats.Stale) > 0 {
+		fmt.Fprintf(&b, "\n\nNo current snapshot: %s", strings.Join(r.Stats.Stale, ", "))
+	}
+	return pitch.Message{
+		Title:    r.Title(),
+		Message:  strings.TrimSpace(b.String()),
+		Severity: r.Severity,
+		Author:   cfg.Author,
+		System:   cfg.System,
+		Tags:     "ai,cluster-analysis,report=" + r.RunID,
+		URL:      cfg.Analysis.ReportURL,
 	}
 }
 

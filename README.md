@@ -230,6 +230,25 @@ go test ./...
 golangci-lint run ./...
 ```
 
+## Image variant `-claude` (#13)
+
+`MODE=cluster-analysis` runs the Claude Code CLI, which the default image
+(`cgr.dev/chainguard/static`, ko) does not have. So every release also ships
+`ghcr.io/stuttgart-things/homerun2-ai-pitcher:<version>-claude`: the same
+binary, built by ko on `ghcr.io/stuttgart-things/homerun2-ai-pitcher-claude-base`
+(`images/claude-code/Dockerfile`: Node 24 + `@anthropic-ai/claude-code`
+pinned, auto-updater and telemetry off, `HOME=/tmp`, uid 1000).
+
+- The base is built by `.github/workflows/build-claude-base.yaml` when its
+  Dockerfile changes (Renovate bumps the CLI there), tagged with the CLI
+  version. The release job `release-claude` pins it by that version.
+- PRs build `pr-<n>-claude`, so a broken base fails before the merge.
+- KCL: a run with `mode: cluster-analysis` gets `<image>-claude`, an
+  `emptyDir` at `/tmp` (read-only root, `HOME=/tmp`), 40 min deadline and its
+  Secrets via `envFromSecrets`; every other mode keeps the slim image.
+
+About 900 MB (Node and the CLI), for a daily job.
+
 ## Deployment
 
 `kcl/` renders a CronJob (default `45 7 * * *`, Europe/Berlin, non-root, read-only root

@@ -8,11 +8,14 @@ schema Run:
     """One scheduled run: its own CronJob with its own MODE"""
     # CronJob name; empty = <name> for morning, <name>-<mode> otherwise
     name: str = ""
-    mode: "morning" | "evening" | "week-ahead" | "weekly"
+    mode: "morning" | "evening" | "week-ahead" | "weekly" | "cluster-analysis"
     # Cron in timeZone
     schedule: str
     suspend: bool = False
     extraEnvVars: {str:str} = {}
+    # Secrets whose keys become env vars (envFrom), e.g. the S3 users and the
+    # Claude Code token of cluster-analysis.
+    envFromSecrets: [str] = []
 
     check:
         schedule != "", "run schedule must not be empty"

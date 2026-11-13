@@ -1,0 +1,50 @@
+---
+# The base image of the -claude variant (#13): Node + the Claude Code CLI.
+# Built when its Dockerfile changes (Renovate bumps the CLI there), tagged
+# with the CLI version and the commit; the release pins it by the version.
+name: Build Claude Code Base Image
+on:
+  push:
+    branches: [main]
+    paths: ["images/claude-code/**", ".github/workflows/build-claude-base.yaml"]
+  pull_request:
+    branches: [main]
+    paths: ["images/claude-code/**", ".github/workflows/build-claude-base.yaml"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/stuttgart-things/homerun2-ai-pitcher-claude-base
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: CLI version from the Dockerfile
+        id: v
+        run: echo "version=$(sed -n 's/^ARG CLAUDE_CODE_VERSION=//p' images/claude-code/Dockerfile)" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (and push on main)
+        run: |
+          set -euo pipefail
+          tags=(-t "$IMAGE:${{ steps.v.outputs.version }}-${GITHUB_SHA::7}")
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            tags+=(-t "$IMAGE:${{ steps.v.outputs.version }}" -t "$IMAGE:latest")
+          fi
+          docker build "${tags[@]}" images/claude-code
+          docker run --rm "$IMAGE:${{ steps.v.outputs.version }}-${GITHUB_SHA::7}" claude --version
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            docker push --all-tags "$IMAGE"
+          fi

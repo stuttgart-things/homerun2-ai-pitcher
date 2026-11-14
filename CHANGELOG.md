@@ -1,3 +1,10 @@
+# [0.8.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.7.0...v0.8.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** GitHub issues from the fleet analysis ([#24](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/24)) ([2be1678](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/2be16785e4c74b32ae8d2cef21a48859be5be489)), closes [#22](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/22)
+
 # [0.7.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.6.0...v0.7.0) (2026-11-14)
 
 

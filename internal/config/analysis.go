@@ -19,26 +19,28 @@ const ClusterAnalysisMode = "cluster-analysis"
 type Analysis struct {
 	// S3 (homerun2-s3-catcher's MinIO): one endpoint, two buckets, each with
 	// its own user -- read-only on the archive, writer on the reports.
-	Endpoint       string
-	Region         string
-	UseSSL         bool
-	Insecure       bool
-	ArchiveBucket  string
-	ArchiveKey     string
-	ArchiveSecret  string
-	ReportBucket   string
-	ReportKey      string
-	ReportSecret   string
-	Sources        []clusteranalysis.Source
-	LookbackDays   int
-	StaleAfter     time.Duration
-	MaxPerCluster  int
-	ReportURL      string // link in the pitch, e.g. the portal's /archive/?tab=analyses
-	ClaudeBin      string
-	ClaudeModel    string
-	ClaudeBudget   float64
-	ClaudeTimeout  time.Duration
-	ClaudeAttempts int
+	Endpoint            string
+	Region              string
+	UseSSL              bool
+	Insecure            bool
+	ArchiveBucket       string
+	ArchiveKey          string
+	ArchiveSecret       string
+	ReportBucket        string
+	ReportKey           string
+	ReportSecret        string
+	Sources             []clusteranalysis.Source
+	InventoryPrefix     string
+	InventoryStaleAfter time.Duration
+	LookbackDays        int
+	StaleAfter          time.Duration
+	MaxPerCluster       int
+	ReportURL           string // link in the pitch, e.g. the portal's /archive/?tab=analyses
+	ClaudeBin           string
+	ClaudeModel         string
+	ClaudeBudget        float64
+	ClaudeTimeout       time.Duration
+	ClaudeAttempts      int
 }
 
 func loadAnalysis(c *Config) error {
@@ -57,6 +59,7 @@ func loadAnalysis(c *Config) error {
 	if a.Sources, err = clusteranalysis.ParseSources(getEnv("ANALYSIS_SOURCES", "k8sgpt,endpoints,vm")); err != nil {
 		return fmt.Errorf("invalid ANALYSIS_SOURCES: %w", err)
 	}
+	a.InventoryPrefix = getEnv("ANALYSIS_INVENTORY_PREFIX", "inventory-")
 	a.ReportURL = getEnv("REPORT_URL", "")
 	a.ClaudeBin = getEnv("CLAUDE_BIN", "claude")
 	a.ClaudeModel = getEnv("CLAUDE_MODEL", "sonnet")
@@ -79,6 +82,7 @@ func loadAnalysis(c *Config) error {
 		dst      *time.Duration
 	}{
 		{"STALE_AFTER", "3h", &a.StaleAfter},
+		{"INVENTORY_STALE_AFTER", "36h", &a.InventoryStaleAfter},
 		{"CLAUDE_TIMEOUT", "10m", &a.ClaudeTimeout},
 	} {
 		if *d.dst, err = time.ParseDuration(getEnv(d.env, d.def)); err != nil || *d.dst <= 0 {

@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.6.0...v0.7.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** inventory as context — versions, images, drift ([#23](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/23)) ([c50ba32](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/c50ba326a79ec3b6d323c0cf8cad2b1abfa79caf)), closes [homerun2-k8s-pitcher#108](https://github.com/homerun2-k8s-pitcher/issues/108) [#21](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/21)
+
 # [0.6.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.5.0...v0.6.0) (2026-11-14)
 
 

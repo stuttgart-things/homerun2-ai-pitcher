@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/clusteranalysis"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/config"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/llm"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/sources"
@@ -420,5 +421,28 @@ func TestRunBudget(t *testing.T) {
 	// per call 3*90s + 5s + 10s = 285s; two calls 570s; tickers 12s; +120s
 	if got, want := runBudget(cfg), 702*time.Second; got != want {
 		t.Errorf("runBudget = %v, want %v", got, want)
+	}
+}
+
+// The analysis card links the issues the run filed or commented (#22).
+func TestClusterAnalysisMessageIssueLinks(t *testing.T) {
+	r := &clusteranalysis.Report{RunID: "run1", Severity: "error", Summary: "Lage.",
+		Topics: []clusteranalysis.Topic{{Title: "Platte voll", Clusters: []string{"sthings-app-2"}}, {Title: "NTP", Clusters: []string{"a"}}},
+		Issues: []clusteranalysis.IssueAction{
+			{Action: "created", Title: "Platte voll", Number: 4588, URL: "https://github.com/x/y/issues/4588"},
+			{Action: "skipped", Title: "NTP", Number: 4589, URL: "https://github.com/x/y/issues/4589", Reason: "commented within 168h"},
+			{Action: "would-create", Title: "Dry"},
+		}}
+	m := clusterAnalysisMessage(&config.Config{}, r)
+	for _, want := range []string{"1. Platte voll (sthings-app-2) → #4588", "GitHub issues:\n- #4588 Platte voll (neu): https://github.com/x/y/issues/4588"} {
+		if !strings.Contains(m.Message, want) {
+			t.Errorf("message lacks %q:\n%s", want, m.Message)
+		}
+	}
+	if strings.Contains(m.Message, "(skipped)") || strings.Contains(m.Message, "Dry") {
+		t.Errorf("skipped or dry-run actions listed:\n%s", m.Message)
+	}
+	if !strings.Contains(m.Tags, "issues=4588") {
+		t.Errorf("tags %q", m.Tags)
 	}
 }

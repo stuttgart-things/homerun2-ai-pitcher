@@ -1,3 +1,10 @@
+# [0.9.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.8.0...v0.9.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** the pitch links the GitHub issues ([#25](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/25)) ([6cc4b79](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/6cc4b7997dca82e2e2a12e1e4be0f03445843a03)), closes [#22](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/22)
+
 # [0.8.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.7.0...v0.8.0) (2026-11-14)
 
 

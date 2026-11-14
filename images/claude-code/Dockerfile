@@ -4,7 +4,7 @@
 # has no Dockerfile -- this is infrastructure, like a distroless base.
 #
 # renovate: datasource=docker depName=node
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.323

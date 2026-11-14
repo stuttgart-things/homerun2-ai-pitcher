@@ -374,3 +374,102 @@ func TestPromptRules(t *testing.T) {
 		}
 	}
 }
+
+// invSnap stores an inventory/v1 snapshot of cluster c (homerun2-k8s-pitcher#108).
+func invSnap(m *memStore, c string, t time.Time, version string, kubelets []string, images []map[string]any, releases []map[string]any) {
+	var nodes []map[string]any
+	for i, k := range kubelets {
+		nodes = append(nodes, map[string]any{"name": fmt.Sprintf("n%d", i), "kubelet": k})
+	}
+	rec := map[string]any{"message": map[string]any{
+		"title": "Inventory " + c, "tags": "k8s,Inventory,snapshot,", "timestamp_unix": t.Unix(),
+		"payload": map[string]any{"format": "inventory/v1", "source": "inventory", "target": c, "version": version,
+			"count": len(images), "nodes": nodes, "images": images, "releases": releases}}}
+	data, _ := json.Marshal(rec)
+	m.objs[fmt.Sprintf("system=inventory-%s/date=%s/inv-%d.json", c, t.Format("2006-01-02"), t.Unix())] = memObj{data, t}
+}
+
+func TestBuildVersions(t *testing.T) {
+	m := fixture()
+	img := func(ref string, latest bool, w ...string) map[string]any {
+		return map[string]any{"image": ref, "latest": latest, "workloads": w}
+	}
+	rel := func(kind, ns, name, chart, ver, status string) map[string]any {
+		return map[string]any{"kind": kind, "namespace": ns, "name": name, "chart": chart, "version": ver, "status": status}
+	}
+	invSnap(m, "a", now.Add(-2*time.Hour), "v1.33.2", []string{"v1.33.2", "v1.32.5"},
+		[]map[string]any{img("ghcr.io/x/web:1.2.3", false, "Deployment/web/web"), img("busybox", true, "Pod/tools/debug"), img("redis:7.2", false)},
+		[]map[string]any{rel("HelmRelease", "flux-system", "cert-manager", "cert-manager", "v1.18.0", "Ready"),
+			rel("Application", "argocd", "shop", "https://git/x//shop", "main", "OutOfSync/Healthy")})
+	invSnap(m, "b", now.Add(-50*time.Hour), "v1.33.2", []string{"v1.33.2"},
+		[]map[string]any{img("ghcr.io/x/web:1.3.0", false), img("redis:7.2", false)},
+		[]map[string]any{rel("HelmRelease", "flux-system", "cert-manager", "cert-manager", "v1.17.1", "Ready")})
+
+	o := opts
+	o.InventoryPrefix, o.InventoryStaleAfter = "inventory-", 36*time.Hour
+	in, err := Build(context.Background(), m, now, nil, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := in.Versions
+	if v == nil || len(v.Clusters) != 2 {
+		t.Fatalf("versions %+v", v)
+	}
+	if a, b := v.Clusters[0], v.Clusters[1]; a.Unpinned != 1 || a.Stale || !b.Stale || a.Images != 3 {
+		t.Errorf("clusters %+v", v.Clusters)
+	}
+	if len(v.Unpinned) != 1 || v.Unpinned[0].Image != "busybox" {
+		t.Errorf("unpinned %+v", v.Unpinned)
+	}
+	if len(v.ImageDrift) != 1 || v.ImageDrift[0].Name != "ghcr.io/x/web" || len(v.ImageDrift[0].Versions) != 2 {
+		t.Errorf("image drift %+v (redis:7.2 everywhere is no drift)", v.ImageDrift)
+	}
+	if len(v.ReleaseDrift) != 1 || v.ReleaseDrift[0].Kind != "HelmRelease" || v.ReleaseDrift[0].Name != "cert-manager" {
+		t.Errorf("release drift %+v", v.ReleaseDrift)
+	}
+	if len(v.KubeletSkew) != 1 || !strings.HasPrefix(v.KubeletSkew[0], "a: ") {
+		t.Errorf("kubelet skew %+v", v.KubeletSkew)
+	}
+	if len(v.NotReady) != 1 || v.NotReady[0].Name != "argocd/shop" {
+		t.Errorf("not ready %+v", v.NotReady)
+	}
+	// Context only: the inventory is no system of the findings.
+	for _, c := range in.Clusters {
+		if c.Source == "inventory" {
+			t.Errorf("inventory counted as findings source: %+v", c)
+		}
+	}
+	r := NewReport(in, "run")
+	md := r.Markdown()
+	for _, want := range []string{"## Versionen", "| a | v1.33.2 | 2 | 3 | 1 |", "⚠ veraltet", "ghcr.io/x/web: `1.2.3` (a) · `1.3.0` (b)", "argocd/shop `OutOfSync/Healthy`", "`busybox`"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q\n%s", want, md)
+		}
+	}
+	if r.Severity != Severity(r.Stats) {
+		t.Error("versions must not change the severity")
+	}
+}
+
+func TestBuildWithoutInventory(t *testing.T) {
+	o := opts
+	o.InventoryPrefix = "inventory-"
+	in, err := Build(context.Background(), fixture(), now, nil, o)
+	if err != nil || in.Versions != nil {
+		t.Errorf("versions %+v err %v", in.Versions, err)
+	}
+	if strings.Contains(NewReport(in, "r").Markdown(), "## Versionen") {
+		t.Error("empty Versionen section")
+	}
+}
+
+func TestSplitImage(t *testing.T) {
+	for ref, want := range map[string][2]string{
+		"nginx": {"nginx", ""}, "nginx:1.27": {"nginx", "1.27"}, "registry:5000/a/b": {"registry:5000/a/b", ""},
+		"registry:5000/a/b:v1@sha256:x": {"registry:5000/a/b", "v1"},
+	} {
+		if r, tag := splitImage(ref); r != want[0] || tag != want[1] {
+			t.Errorf("%s: %s %s", ref, r, tag)
+		}
+	}
+}

@@ -101,6 +101,16 @@ tagged `snapshot` whose payload is
 with the open findings only. A new source needs no code: add it to
 `ANALYSIS_SOURCES`.
 
+**Versions as context (#21).** The latest `inventory-<cluster>` snapshot
+(`inventory/v1`) of each cluster is condensed in code into facts:
+- Kubernetes and kubelet versions, and kubelets on another minor or on several versions
+- images with `:latest` or no tag
+- the same image repository, chart or Crossplane package in different versions on two clusters or more
+- HelmReleases, Applications and packages that are not ready
+
+Claude gets them as `versions` context; they are not findings (no new or
+resolved, no severity). The report renders them as the section **Versionen**.
+
 ```
 k8s-cluster-report (read-only user)
   └ per cluster: the latest snapshot + one per day of LOOKBACK_DAYS
@@ -134,6 +144,7 @@ k8s-cluster-report (read-only user)
 | `REPORT_BUCKET`, `REPORT_ACCESS_KEY`, `REPORT_SECRET_KEY` | `k8s-cluster-analysis`, **required** | writer of the reports |
 | `ANALYSIS_SOURCES` | `k8sgpt,endpoints,vm` | sources, archive prefix `system=<name>-<target>/`; `name=prefix` sets another prefix |
 | `LOOKBACK_DAYS` | `7` | days of snapshots per system |
+| `ANALYSIS_INVENTORY_PREFIX` / `INVENTORY_STALE_AFTER` | `inventory-` / `36h` | the clusters' inventory (k8s-pitcher#108) as context, #21 |
 | `STALE_AFTER` | `3h` | snapshots come hourly |
 | `MAX_FINDINGS_PER_CLUSTER` | `50` | passed on per system (new and recurring first) |
 | `REPORT_URL` | — | link in the pitch, e.g. the portal's `/archive/?tab=analyses` |

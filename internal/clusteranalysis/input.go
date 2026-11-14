@@ -74,6 +74,8 @@ type Input struct {
 	Resolved       []Ref          `json:"resolvedSinceLastReport"`
 	CrossCluster   []CrossCluster `json:"crossCluster,omitempty"`
 	PreviousReport string         `json:"previousReport,omitempty"` // its summary
+	// Versions is the clusters' inventory as context (#21), nil without one.
+	Versions *Versions `json:"versions,omitempty"`
 }
 
 // Ref names a finding without its details.
@@ -122,6 +124,8 @@ func ParseSources(s string) ([]Source, error) {
 type Options struct {
 	Sources             []Source      // DefaultSources when empty
 	LookbackDays        int           // days of snapshots read per cluster
+	InventoryPrefix     string        // system=<InventoryPrefix><cluster>/ of the inventory (#21); empty: none
+	InventoryStaleAfter time.Duration // the inventory comes daily
 	StaleAfter          time.Duration // a newer snapshot is expected every hour
 	MaxFindingsPerClu   int           // findings passed on per target
 	MaxGetsPerDay       int           // objects read per target and day to find its last snapshot
@@ -390,6 +394,9 @@ func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Opt
 		return ra.Source+ra.Cluster+ra.Name < rb.Source+rb.Cluster+rb.Name
 	})
 	in.CrossCluster = crossCluster(in.Clusters)
+	if in.Versions, err = BuildVersions(ctx, r, now, days, o); err != nil {
+		return in, err
+	}
 	return in, nil
 }
 

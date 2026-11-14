@@ -95,7 +95,9 @@ type Report struct {
 	Topics       []Topic       `json:"topics"`
 	// OpenFindings are the next run's baseline for new and resolved.
 	OpenFindings []Ref `json:"openFindings"`
-	Resolved     []Ref `json:"resolved,omitempty"`
+	// Versions is the inventory context (#21), copied from the input.
+	Versions *Versions `json:"versions,omitempty"`
+	Resolved []Ref     `json:"resolved,omitempty"`
 	// AssessmentError is set when the model failed: the report then carries
 	// the numbers only.
 	AssessmentError string `json:"assessmentError,omitempty"`
@@ -103,7 +105,7 @@ type Report struct {
 
 // NewReport fills everything but the model's assessment from the input.
 func NewReport(in Input, runID string) *Report {
-	r := &Report{Version: 1, RunID: runID, GeneratedAt: in.GeneratedAt, LookbackDays: in.LookbackDays, Resolved: in.Resolved}
+	r := &Report{Version: 1, RunID: runID, GeneratedAt: in.GeneratedAt, LookbackDays: in.LookbackDays, Resolved: in.Resolved, Versions: in.Versions}
 	r.Stats.Clusters = len(in.Clusters)
 	r.Stats.Resolved = len(in.Resolved)
 	for _, c := range in.Clusters {
@@ -242,6 +244,9 @@ func (r *Report) Markdown() string {
 			stale = " ⚠ veraltet"
 		}
 		fmt.Fprintf(&b, "| %s | %s | %d | %d | %s%s |\n", area(c.Source), c.Cluster, c.Open, c.New, c.SnapshotAt.Format("2006-01-02 15:04"), stale)
+	}
+	if r.Versions != nil {
+		r.Versions.markdown(&b)
 	}
 	if len(r.Resolved) > 0 {
 		b.WriteString("\n## Behoben seit dem letzten Bericht\n\n")

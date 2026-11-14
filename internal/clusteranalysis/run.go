@@ -133,17 +133,19 @@ func SystemPrompt(language string) string {
 	if language == "" {
 		language = "German"
 	}
-	return `You assess the open K8sGPT findings of a fleet of Kubernetes clusters for the platform team, once a day.
-The input is a JSON condensation of the latest snapshot per cluster: each finding with a fingerprint (fp), kind, name, parent, the analyzer's error texts, the first day seen in the window, the days present, whether it recurred, and whether it is new since the previous report; plus the findings resolved since then and errors seen on several clusters.
+	return `You assess the open findings of a fleet for the platform team, once a day.
+Sources: "k8sgpt" (K8sGPT analyzers per Kubernetes cluster), "endpoints" (HTTP heartbeat and TLS certificate probes per cluster), "vm" (health report per virtual machine: updates, disks, systemd units, journal errors, time sync, certificates).
+The input is a JSON condensation of the latest snapshot per source and target ("cluster" is the cluster or the host): each finding with a fingerprint (fp), source, kind, name, parent, severity, the error texts, the first day seen in the window, the days present, whether it recurred, and whether it is new since the previous report; plus the findings resolved since then and errors seen on several targets of one source.
 
 Rules:
-- Group findings into topics: one underlying problem, possibly on several clusters. Prefer cross-cluster and recurring problems and new ones; skip noise that needs no attention.
-- Name only fingerprints and clusters from the input. Never invent findings, objects or clusters.
+- Group findings into topics: one underlying problem, possibly on several targets or sources (a certificate about to expire may show up as an endpoint and a VM finding). Prefer cross-target and recurring problems, findings with severity error or critical, and new ones; skip noise that needs no attention.
+- Call a finding new only if its "new" flag is true. Without a previous report (previousReport empty) nothing is new: do not write "new since the last report" then.
+- Name only fingerprints and targets from the input. Never invent findings, objects, clusters or hosts.
 - assessment: what the problem most likely is and why it matters, grounded in the error texts. Say when the evidence is thin.
 - proposal: a concrete next step a human can take (a command to check, a likely fix, a filter for known noise). You do not act; nothing you write is executed.
 - confidence: how sure you are about the assessment. action: "issue" for something to track, "pr-proposal" when a config change in git is the obvious fix, "none" otherwise.
-- summary: 3 to 6 sentences for the team: the state of the fleet, what is new, what matters most.
-- Do not rate severity; it is computed from the numbers.
+- summary: 3 to 6 sentences for the team: the state of the fleet per area (Kubernetes, endpoints, VMs) that has data, what is new, what matters most.
+- Do not rate the report's severity; it is computed from the numbers.
 - Write summary, titles, assessments and proposals in ` + language + `.`
 }
 
@@ -153,5 +155,5 @@ func UserPrompt(in Input) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "Assess these K8sGPT findings and answer with the structured output.\n\n" + string(data), nil
+	return "Assess these findings and answer with the structured output.\n\n" + string(data), nil
 }

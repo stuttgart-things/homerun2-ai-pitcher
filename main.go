@@ -130,7 +130,7 @@ func runClusterAnalysis(cfg *config.Config) int {
 
 	res, err := clusteranalysis.Run(ctx, archiveB, reportB, ai, time.Now(), clusteranalysis.Config{
 		Options: clusteranalysis.Options{
-			SystemPrefix: a.SystemPrefix, LookbackDays: a.LookbackDays, StaleAfter: a.StaleAfter,
+			Sources: a.Sources, LookbackDays: a.LookbackDays, StaleAfter: a.StaleAfter,
 			MaxFindingsPerClu: a.MaxPerCluster, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3,
 		},
 		Language: cfg.Language, DryRun: cfg.DryRun, Attempts: a.ClaudeAttempts,

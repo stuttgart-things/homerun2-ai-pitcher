@@ -75,7 +75,7 @@ the ticker and the activity; an env var that is set still wins. Each mode runs a
 | `evening` | 18:45 Mon–Fri, before quiet hours | daily | what stays open, what is due tomorrow, what got done | `ai-evening` | no | yes |
 | `week-ahead` | Mon 07:50 | daily | findings due in the next 7 days, by date | `ai-week-ahead` | no | no |
 | `weekly` | Fri 15:00 | weekly (scout v0.12+) | releases, PRs, outages of the week vs. the week before | `ai-weekly` | yes | yes |
-| `cluster-analysis` | daily 07:30 | `LOOKBACK_DAYS` (7) | K8sGPT findings of all clusters from S3, by **Claude Code** — see below | `ai-cluster-analysis` | no | no |
+| `cluster-analysis` | daily 07:30 | `LOOKBACK_DAYS` (7) | findings of the fleet (K8sGPT, endpoint probes, VMs) from S3, by **Claude Code** — see below | `ai-cluster-analysis` | no | no |
 
 The title says which run it is: `[AI] 24h: …` for morning (unchanged), `[AI evening] …`,
 `[AI week ahead] …`, `[AI weekly] 7d: …`; tags end in the mode (`ai,digest,daily,evening`).
@@ -84,10 +84,22 @@ scout must exclude every pitched system from its digests:
 
 ## Cluster analysis (`MODE=cluster-analysis`)
 
-Once a day, **Claude Code** assesses the K8sGPT findings of **all clusters**
-(#12, tracking stuttgart-things/stuttgart-things#4556). It reads no scout:
+Once a day, **Claude Code** assesses the findings of the **whole fleet**
+(#12, #18, tracking stuttgart-things/stuttgart-things#4556). It reads no scout:
 its input is the S3 archive that homerun2-s3-catcher fills (bucket
-`k8s-cluster-report`, systems `k8sgpt-<cluster>`), and it acts on nothing.
+`k8s-cluster-report`), and it acts on nothing. Sources (`ANALYSIS_SOURCES`):
+
+| Source | Systems | Snapshot payload |
+|---|---|---|
+| `k8sgpt` | `k8sgpt-<cluster>` | K8sGPT Result CRs (k8s-pitcher snapshot collector) |
+| `endpoints` | `endpoints-<cluster>` | `findings/v1` (k8s-pitcher endpoint probes) |
+| `vm` | `vm-<host>` | `findings/v1` (Ansible health report) |
+
+`findings/v1` (contract: stuttgart-things/stuttgart-things#4556): a message
+tagged `snapshot` whose payload is
+`{"format":"findings/v1","source":…,"target":…,"count":n,"items":[{"fingerprint","kind","name","namespace","parent","severity","texts"}]}`
+with the open findings only. A new source needs no code: add it to
+`ANALYSIS_SOURCES`.
 
 ```
 k8s-cluster-report (read-only user)
@@ -104,8 +116,9 @@ k8s-cluster-report (read-only user)
 ```
 
 - **Numbers and severity come from the input, never from the model**
-  (ground rules above): `warning` with new findings or a cluster without a
-  current snapshot, `success` with none open, else `info`.
+  (ground rules above): `error` with a new finding of severity error or
+  critical, `warning` with other new findings or a system without a current
+  snapshot, `success` with none open, else `info`.
 - **The model failing is not fatal:** the report carries the numbers and the
   error, and the pitch says `[AI n/a]`.
 - **The previous report is the baseline** for new and resolved (its
@@ -119,10 +132,10 @@ k8s-cluster-report (read-only user)
 | `S3_USE_SSL` / `S3_INSECURE` / `S3_REGION` | `true` / `false` / `us-east-1` | |
 | `ARCHIVE_BUCKET`, `ARCHIVE_ACCESS_KEY`, `ARCHIVE_SECRET_KEY` | `k8s-cluster-report`, **required** | read-only user |
 | `REPORT_BUCKET`, `REPORT_ACCESS_KEY`, `REPORT_SECRET_KEY` | `k8s-cluster-analysis`, **required** | writer of the reports |
-| `ANALYSIS_SYSTEM_PREFIX` | `k8sgpt-` | archive prefix `system=<prefix><cluster>/` |
-| `LOOKBACK_DAYS` | `7` | days of snapshots per cluster |
+| `ANALYSIS_SOURCES` | `k8sgpt,endpoints,vm` | sources, archive prefix `system=<name>-<target>/`; `name=prefix` sets another prefix |
+| `LOOKBACK_DAYS` | `7` | days of snapshots per system |
 | `STALE_AFTER` | `3h` | snapshots come hourly |
-| `MAX_FINDINGS_PER_CLUSTER` | `50` | passed on per cluster (new and recurring first) |
+| `MAX_FINDINGS_PER_CLUSTER` | `50` | passed on per system (new and recurring first) |
 | `REPORT_URL` | — | link in the pitch, e.g. the portal's `/archive/?tab=analyses` |
 | `CLAUDE_BIN` / `CLAUDE_MODEL` | `claude` / `sonnet` | |
 | `CLAUDE_MAX_BUDGET_USD` | `2` | `--max-budget-usd` per call |

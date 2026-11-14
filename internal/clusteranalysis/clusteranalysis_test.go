@@ -85,7 +85,7 @@ func snap(m *memStore, c string, t time.Time, items ...item) {
 	m.objs[fmt.Sprintf("system=k8sgpt-%s/date=%s/event-%d.json", c, day, t.Unix())] = memObj{ev, t.Add(time.Second)}
 }
 
-var opts = Options{SystemPrefix: "k8sgpt-", LookbackDays: 7, StaleAfter: 3 * time.Hour, MaxFindingsPerClu: 50, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3}
+var opts = Options{LookbackDays: 7, StaleAfter: 3 * time.Hour, MaxFindingsPerClu: 50, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3}
 
 func day(d int) time.Time { return now.AddDate(0, 0, -d).Add(-time.Hour) }
 
@@ -178,7 +178,7 @@ func TestReportNumbersAndApply(t *testing.T) {
 		t.Errorf("dropped %d topics %+v summary %q", dropped, r.Topics, r.Summary)
 	}
 	md := r.Markdown()
-	for _, want := range []string{"**3 offene Funde** auf 2 Clustern", "Keine aktuellen Snapshots** von: b", "### 1. Service ohne Endpoints", "| a | 2 |"} {
+	for _, want := range []string{"**3 offene Funde** auf 2 Systemen", "Keine aktuellen Snapshots** von: k8sgpt/b", "### 1. Service ohne Endpoints", "| Kubernetes | a | 2 |"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown lacks %q", want)
 		}
@@ -191,6 +191,7 @@ func TestSeverity(t *testing.T) {
 		{Open: 4}:                       "info",
 		{Open: 4, New: 1}:               "warning",
 		{Open: 0, Stale: []string{"x"}}: "warning",
+		{Open: 4, New: 2, NewErrors: 1}: "error",
 	} {
 		if got := Severity(*s); got != want {
 			t.Errorf("%+v: %s, want %s", *s, got, want)
@@ -271,5 +272,105 @@ func TestSchemaIsJSON(t *testing.T) {
 	}
 	if !strings.Contains(SystemPrompt("German"), "in German") {
 		t.Error("language not in the system prompt")
+	}
+}
+
+// findingsSnap stores a findings/v1 snapshot of system <source>-<target>.
+func findingsSnap(m *memStore, source, target string, t time.Time, items ...map[string]any) {
+	rec := map[string]any{"message": map[string]any{
+		"title": source + " snapshot", "tags": "snapshot", "timestamp_unix": t.Unix(),
+		"payload": map[string]any{"format": "findings/v1", "source": source, "target": target, "count": len(items), "items": items}}}
+	data, _ := json.Marshal(rec)
+	m.objs[fmt.Sprintf("system=%s-%s/date=%s/snap-%d.json", source, target, t.Format("2006-01-02"), t.Unix())] = memObj{data, t}
+}
+
+func TestBuildFindingsV1Sources(t *testing.T) {
+	m := fixture()
+	cert := map[string]any{"fingerprint": "fp-cert", "kind": "Certificate", "name": "argocd.example.com", "namespace": "argocd",
+		"parent": "HTTPRoute/argocd/argocd-server", "severity": "error", "texts": []string{"certificate expires in 2 days"}}
+	findingsSnap(m, "endpoints", "a", now.Add(-time.Hour), cert)
+	findingsSnap(m, "vm", "host1", now.Add(-time.Hour), map[string]any{"fingerprint": "fp-disk", "kind": "Disk", "name": "/var", "severity": "warning", "texts": []string{"91% used"}})
+	findingsSnap(m, "vm", "host2", now.Add(-time.Hour)) // healthy: no findings
+	// Same kind and text as a K8sGPT finding, but another source: no cross-target group with it.
+	findingsSnap(m, "endpoints", "b", now.Add(-time.Hour), map[string]any{"fingerprint": "fp-x", "kind": "Service", "name": "default/web", "severity": "warning", "texts": []string{"Service has no endpoints"}})
+
+	prev := &Report{OpenFindings: []Ref{{Fingerprint: "fp-svc-a", Cluster: "a", Kind: "Service", Name: "default/web"}}}
+	in, err := Build(context.Background(), m, now, prev, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	byFP := map[string]Finding{}
+	for _, c := range in.Clusters {
+		got = append(got, c.Source+"/"+c.Cluster)
+		for _, f := range c.Findings {
+			byFP[f.Fingerprint] = f
+		}
+	}
+	if want := "k8sgpt/a,k8sgpt/b,endpoints/a,endpoints/b,vm/host1,vm/host2"; strings.Join(got, ",") != want {
+		t.Fatalf("targets %v, want %s", got, want)
+	}
+	if f := byFP["fp-cert"]; f.Source != "endpoints" || f.Severity != "error" || f.Namespace != "argocd" || f.Parent == "" || len(f.Errors) != 1 || !f.New {
+		t.Errorf("cert: %+v", f)
+	}
+	if f := byFP["fp-svc-a"]; f.New || f.Severity != "warning" || f.Source != "k8sgpt" {
+		t.Errorf("legacy baseline without source must still match: %+v", f)
+	}
+	for _, cc := range in.CrossCluster {
+		if cc.Source != "k8sgpt" || strings.Join(cc.Clusters, ",") != "a,b" {
+			t.Errorf("cross-target group across sources: %+v", cc)
+		}
+	}
+	r := NewReport(in, "run")
+	if r.Stats.NewErrors != 1 || r.Severity != "error" {
+		t.Errorf("stats %+v severity %s", r.Stats, r.Severity)
+	}
+	md := r.Markdown()
+	for _, want := range []string{"| Endpunkte | a | 1 |", "| VMs | host2 | 0 |", "# Fleet-Analyse"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q", want)
+		}
+	}
+	if !strings.HasPrefix(r.Title(), "[AI fleet analysis]") {
+		t.Errorf("title %q", r.Title())
+	}
+}
+
+func TestTargetsLongestPrefix(t *testing.T) {
+	m := newStore()
+	for _, sys := range []string{"vm-a", "vmware-b", "k8sgpt-", "flux"} {
+		m.objs["system="+sys+"/date=2026-11-13/x.json"] = memObj{[]byte(`{}`), now}
+	}
+	ts, err := Targets(context.Background(), m, []Source{{"vm", "vm-"}, {"vmware", "vmware-"}, {"k8sgpt", "k8sgpt-"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, x := range ts {
+		got = append(got, x.Source.Name+"/"+x.Name)
+	}
+	if strings.Join(got, ",") != "vm/a,vmware/b" {
+		t.Errorf("targets %v", got)
+	}
+}
+
+func TestParseSources(t *testing.T) {
+	s, err := ParseSources("k8sgpt, endpoints=probe-,vm")
+	if err != nil || len(s) != 3 || s[0].Prefix != "k8sgpt-" || s[1].Prefix != "probe-" || s[2].Name != "vm" {
+		t.Errorf("%+v %v", s, err)
+	}
+	for _, bad := range []string{"", " , ", "=x", "a="} {
+		if _, err := ParseSources(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestPromptRules(t *testing.T) {
+	p := SystemPrompt("German")
+	for _, want := range []string{`"new" flag is true`, "endpoints", "vm"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("system prompt lacks %q", want)
+		}
 	}
 }

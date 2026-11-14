@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/clusteranalysis"
 )
 
 // ClusterAnalysisMode is the mode of homerun2-ai-pitcher#12: Claude Code over
@@ -27,7 +29,7 @@ type Analysis struct {
 	ReportBucket   string
 	ReportKey      string
 	ReportSecret   string
-	SystemPrefix   string
+	Sources        []clusteranalysis.Source
 	LookbackDays   int
 	StaleAfter     time.Duration
 	MaxPerCluster  int
@@ -51,12 +53,14 @@ func loadAnalysis(c *Config) error {
 	a.ReportBucket = getEnv("REPORT_BUCKET", "k8s-cluster-analysis")
 	a.ReportKey = getEnv("REPORT_ACCESS_KEY", "")
 	a.ReportSecret = getEnv("REPORT_SECRET_KEY", "")
-	a.SystemPrefix = getEnv("ANALYSIS_SYSTEM_PREFIX", "k8sgpt-")
+	var err error
+	if a.Sources, err = clusteranalysis.ParseSources(getEnv("ANALYSIS_SOURCES", "k8sgpt,endpoints,vm")); err != nil {
+		return fmt.Errorf("invalid ANALYSIS_SOURCES: %w", err)
+	}
 	a.ReportURL = getEnv("REPORT_URL", "")
 	a.ClaudeBin = getEnv("CLAUDE_BIN", "claude")
 	a.ClaudeModel = getEnv("CLAUDE_MODEL", "sonnet")
 
-	var err error
 	for _, i := range []struct {
 		env      string
 		def, min int

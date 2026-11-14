@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.5.0...v0.6.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** fleet analysis over all sources with findings/v1 ([#19](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/19)) ([a1401fd](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/a1401fd16a26b92f6bfbd81cc0b46ce3a901a14e)), closes [stuttgart-things/stuttgart-things#4556](https://github.com/stuttgart-things/stuttgart-things/issues/4556) [#18](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/18)
+
 # [0.5.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.4.1...v0.5.0) (2026-11-13)
 
 

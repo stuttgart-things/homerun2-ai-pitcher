@@ -98,6 +98,10 @@ type Report struct {
 	// Versions is the inventory context (#21), copied from the input.
 	Versions *Versions `json:"versions,omitempty"`
 	Resolved []Ref     `json:"resolved,omitempty"`
+	// Issues are the GitHub issues this run created, commented or would
+	// have (dry run), #22.
+	Issues      []IssueAction `json:"issues,omitempty"`
+	IssuesError string        `json:"issuesError,omitempty"`
 	// AssessmentError is set when the model failed: the report then carries
 	// the numbers only.
 	AssessmentError string `json:"assessmentError,omitempty"`
@@ -193,6 +197,15 @@ func (r *Report) Apply(a Assessment, in Input) (dropped int) {
 	return dropped
 }
 
+// IssueAction is what happened to one tracking issue.
+type IssueAction struct {
+	Action string `json:"action"` // created, commented, reopened, resolved, would-create, would-comment, would-resolve, skipped
+	Title  string `json:"title"`
+	Number int    `json:"number,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // Title of the run's pitch.
 func (r *Report) Title() string {
 	return fmt.Sprintf("[AI fleet analysis] %d open %s on %d %s (%d new, %d resolved)",
@@ -252,6 +265,23 @@ func (r *Report) Markdown() string {
 		b.WriteString("\n## Behoben seit dem letzten Bericht\n\n")
 		for _, f := range r.Resolved {
 			fmt.Fprintf(&b, "- %s: %s %s (%s) `%s`\n", area(f.Source), f.Kind, f.Name, f.Cluster, f.Fingerprint)
+		}
+	}
+	if len(r.Issues) > 0 || r.IssuesError != "" {
+		b.WriteString("\n## GitHub-Issues\n\n")
+		for _, i := range r.Issues {
+			ref := i.Title
+			if i.URL != "" {
+				ref = fmt.Sprintf("[#%d %s](%s)", i.Number, i.Title, i.URL)
+			}
+			fmt.Fprintf(&b, "- `%s` %s", i.Action, ref)
+			if i.Reason != "" {
+				fmt.Fprintf(&b, " — %s", i.Reason)
+			}
+			b.WriteString("\n")
+		}
+		if r.IssuesError != "" {
+			fmt.Fprintf(&b, "\n> Issue-Abgleich fehlgeschlagen: %s\n", r.IssuesError)
 		}
 	}
 	fmt.Fprintf(&b, "\n---\nLauf `%s`", r.RunID)

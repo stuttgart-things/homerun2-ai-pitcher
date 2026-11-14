@@ -20,6 +20,7 @@ import (
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/claudecode"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/clusteranalysis"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/config"
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/fleetissues"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/llm"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/pitch"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/sources"
@@ -135,6 +136,7 @@ func runClusterAnalysis(cfg *config.Config) int {
 			MaxFindingsPerClu: a.MaxPerCluster, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3,
 		},
 		Language: cfg.Language, DryRun: cfg.DryRun, Attempts: a.ClaudeAttempts,
+		Issues: issueSyncer(cfg),
 	})
 	if err != nil {
 		slog.Error("cluster analysis failed", "error", err)
@@ -380,4 +382,24 @@ func logLevel() slog.Level {
 		return slog.LevelError
 	}
 	return slog.LevelInfo
+}
+
+// issueSyncer files GitHub issues from the analysis (#22); a dry run of the
+// whole analysis only says what it would file.
+func issueSyncer(cfg *config.Config) clusteranalysis.IssueSyncer {
+	a := cfg.Analysis
+	mode := a.IssuesMode
+	if mode == fleetissues.ModeOff {
+		return nil
+	}
+	if cfg.DryRun {
+		mode = fleetissues.ModeDryRun
+	}
+	s := &fleetissues.Syncer{Cfg: fleetissues.Config{Mode: mode, MaxPerRun: a.IssuesMaxPerRun,
+		CommentEvery: a.IssuesCommentEvery, CloseResolved: a.IssuesCloseResolved, ReportURL: a.ReportURL}}
+	if a.IssuesToken != "" {
+		s.Client = &fleetissues.GitHub{Repo: a.IssuesRepo, Token: a.IssuesToken}
+	}
+	slog.Info("github issues", "mode", mode, "repo", a.IssuesRepo)
+	return s
 }

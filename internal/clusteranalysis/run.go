@@ -31,6 +31,15 @@ type Config struct {
 	Language string // of summary, assessments and proposals
 	DryRun   bool   // build and print, store nothing
 	Attempts int    // model attempts
+	// Issues files GitHub issues for the topics (#22); nil: none.
+	Issues IssueSyncer
+}
+
+// IssueSyncer creates or updates tracking issues from a report. It runs
+// after the assessment, before the report is stored; its error is
+// recorded in the report, not fatal.
+type IssueSyncer interface {
+	Sync(ctx context.Context, rep *Report, in Input) ([]IssueAction, error)
 }
 
 // Result of one run.
@@ -78,6 +87,14 @@ func Run(ctx context.Context, archiveR Reader, reports ReportStore, ai AI, now t
 	}
 	if aerr != nil {
 		rep.AssessmentError = aerr.Error()
+	}
+	if cfg.Issues != nil {
+		acts, err := cfg.Issues.Sync(ctx, rep, in)
+		rep.Issues = acts
+		if err != nil {
+			slog.Warn("issue sync failed", "error", err)
+			rep.IssuesError = err.Error()
+		}
 	}
 
 	day := now.UTC().Format("2006-01-02")

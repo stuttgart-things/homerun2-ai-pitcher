@@ -27,6 +27,18 @@ func TestClusterAnalysisConfig(t *testing.T) {
 	if c.ScoutURL != "" {
 		t.Errorf("scout url %q", c.ScoutURL)
 	}
+	if a.Labs != nil {
+		t.Errorf("labs without ANALYSIS_LABS: %+v", a.Labs)
+	}
+	t.Setenv("ANALYSIS_LABS", "LabUL=platform-sthings,*-labul;LabDA=sthings-app*")
+	if c, err = Load(); err != nil || c.Analysis.Labs.Of("sbx-labul") != "LabUL" {
+		t.Errorf("ANALYSIS_LABS: %v", err)
+	}
+	t.Setenv("ANALYSIS_LABS", "LabUL")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ANALYSIS_LABS") {
+		t.Errorf("invalid ANALYSIS_LABS accepted: %v", err)
+	}
+	t.Setenv("ANALYSIS_LABS", "")
 	t.Setenv("LOOKBACK_DAYS", "0")
 	if _, err := Load(); err == nil {
 		t.Error("LOOKBACK_DAYS=0 accepted")

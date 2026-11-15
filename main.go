@@ -134,6 +134,7 @@ func runClusterAnalysis(cfg *config.Config) int {
 			Sources: a.Sources, LookbackDays: a.LookbackDays, StaleAfter: a.StaleAfter,
 			InventoryPrefix: a.InventoryPrefix, InventoryStaleAfter: a.InventoryStaleAfter,
 			MaxFindingsPerClu: a.MaxPerCluster, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3,
+			Labs: a.Labs,
 		},
 		Language: cfg.Language, DryRun: cfg.DryRun, Attempts: a.ClaudeAttempts,
 		Issues: issueSyncer(cfg),
@@ -173,6 +174,18 @@ func clusterAnalysisMessage(cfg *config.Config, r *clusteranalysis.Report) pitch
 	}
 	if r.AssessmentError != "" {
 		b.WriteString("[AI n/a] numbers only\n")
+	}
+	// Per lab (#26): the analysis spans the labs, the card says where.
+	if len(r.Labs) > 0 {
+		var parts []string
+		for _, l := range r.Labs {
+			name := l.Lab
+			if name == "" {
+				name = "no lab"
+			}
+			parts = append(parts, fmt.Sprintf("%s: %d open, %d new on %d", name, l.Open, l.New, l.Systems))
+		}
+		b.WriteString(strings.Join(parts, " · ") + "\n")
 	}
 	issueOf := map[string]clusteranalysis.IssueAction{} // topic title -> its issue
 	for _, a := range r.Issues {

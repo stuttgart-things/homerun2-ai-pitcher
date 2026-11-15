@@ -51,6 +51,7 @@ type Finding struct {
 type ClusterState struct {
 	Source     string    `json:"source"`
 	Cluster    string    `json:"cluster"`
+	Lab        string    `json:"lab,omitempty"` // ANALYSIS_LABS, #26
 	SnapshotAt time.Time `json:"snapshotAt"`
 	Stale      bool      `json:"stale,omitempty"`
 	Open       int       `json:"open"`
@@ -68,8 +69,11 @@ type CrossCluster struct {
 
 // Input is what the model gets, and what the report's numbers come from.
 type Input struct {
-	GeneratedAt    time.Time      `json:"generatedAt"`
-	LookbackDays   int            `json:"lookbackDays"`
+	GeneratedAt  time.Time `json:"generatedAt"`
+	LookbackDays int       `json:"lookbackDays"`
+	// Labs are the configured labs in order (#26); every target carries its
+	// lab, "" when no pattern matched.
+	Labs           []string       `json:"labs,omitempty"`
 	Clusters       []ClusterState `json:"clusters"`
 	Resolved       []Ref          `json:"resolvedSinceLastReport"`
 	CrossCluster   []CrossCluster `json:"crossCluster,omitempty"`
@@ -131,6 +135,7 @@ type Options struct {
 	MaxGetsPerDay       int           // objects read per target and day to find its last snapshot
 	MaxErrorChars       int
 	MaxErrorsPerFinding int
+	Labs                Labs // groups the targets by lab (#26); empty: no grouping
 }
 
 // snapshot is the archived message of a snapshot collector.
@@ -286,6 +291,9 @@ func refSource(r Ref) string {
 // previous report's open findings.
 func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Options) (Input, error) {
 	in := Input{GeneratedAt: now.UTC(), LookbackDays: o.LookbackDays}
+	for _, l := range o.Labs {
+		in.Labs = append(in.Labs, l.Name)
+	}
 	sources := o.Sources
 	if len(sources) == 0 {
 		sources = DefaultSources
@@ -336,7 +344,7 @@ func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Opt
 			slog.Warn("no snapshot in the window", "source", t.Source.Name, "target", c, "days", o.LookbackDays)
 			continue
 		}
-		st := ClusterState{Source: t.Source.Name, Cluster: c, SnapshotAt: latest.At, Stale: now.Sub(latest.At) > o.StaleAfter, Open: len(latest.Items)}
+		st := ClusterState{Source: t.Source.Name, Cluster: c, Lab: o.Labs.Of(c), SnapshotAt: latest.At, Stale: now.Sub(latest.At) > o.StaleAfter, Open: len(latest.Items)}
 		for _, it := range latest.Items {
 			f := Finding{
 				Fingerprint: it.Fingerprint, Source: t.Source.Name, Cluster: c,

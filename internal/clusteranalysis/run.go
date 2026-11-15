@@ -162,7 +162,8 @@ Rules:
 - assessment: what the problem most likely is and why it matters, grounded in the error texts. Say when the evidence is thin.
 - proposal: a concrete next step a human can take (a command to check, a likely fix, a filter for known noise). You do not act; nothing you write is executed.
 - confidence: how sure you are about the assessment. action: "issue" for something to track, "pr-proposal" when a config change in git is the obvious fix, "none" otherwise.
-- summary: 3 to 6 sentences for the team: the state of the fleet per area (Kubernetes, endpoints, VMs) that has data, what is new, what matters most.
+- summary: 3 to 6 sentences for the team: the state of the fleet per area (Kubernetes, endpoints, VMs) that has data, what is new, what matters most. If "labs" is present, every target carries its "lab": say which lab a problem is in, and give the state per lab.
+- Topic titles: if "labs" is present and a topic concerns one lab only, start the title with that lab ("LabDA: ...").
 - Do not rate the report's severity; it is computed from the numbers.
 - Write summary, titles, assessments and proposals in ` + language + `.`
 }

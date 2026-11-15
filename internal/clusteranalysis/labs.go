@@ -67,17 +67,6 @@ func (ls Labs) Of(target string) string {
 	return ""
 }
 
-// order is the position of a lab in the configuration; unknown labs ("")
-// come last.
-func (ls Labs) order(name string) int {
-	for i, l := range ls {
-		if l.Name == name {
-			return i
-		}
-	}
-	return len(ls)
-}
-
 // LabStats are one lab's numbers in the report.
 type LabStats struct {
 	Lab     string `json:"lab"`

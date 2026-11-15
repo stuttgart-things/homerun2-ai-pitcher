@@ -1,3 +1,10 @@
+## [0.10.1](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.10.0...v0.10.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **cluster-analysis:** stale threshold per source (ANALYSIS_STALE_AFTER, default vm=26h) ([#29](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/29)) ([21bb482](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/21bb482b53bd3bf315339bd1ba5ac1f7149688b8)), closes [#28](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/28)
+
 # [0.10.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.9.0...v0.10.0) (2026-11-15)
 
 

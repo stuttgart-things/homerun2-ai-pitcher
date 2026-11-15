@@ -131,11 +131,44 @@ type Options struct {
 	InventoryPrefix     string        // system=<InventoryPrefix><cluster>/ of the inventory (#21); empty: none
 	InventoryStaleAfter time.Duration // the inventory comes daily
 	StaleAfter          time.Duration // a newer snapshot is expected every hour
-	MaxFindingsPerClu   int           // findings passed on per target
-	MaxGetsPerDay       int           // objects read per target and day to find its last snapshot
+	// StaleAfterBySource overrides StaleAfter per source (#28): the VM
+	// health reports come once a day.
+	StaleAfterBySource  map[string]time.Duration
+	MaxFindingsPerClu   int // findings passed on per target
+	MaxGetsPerDay       int // objects read per target and day to find its last snapshot
 	MaxErrorChars       int
 	MaxErrorsPerFinding int
 	Labs                Labs // groups the targets by lab (#26); empty: no grouping
+}
+
+// staleAfter is the threshold of a source: its override, else StaleAfter.
+func (o Options) staleAfter(source string) time.Duration {
+	if d, ok := o.StaleAfterBySource[source]; ok {
+		return d
+	}
+	return o.StaleAfter
+}
+
+// ParseStaleAfter reads "vm=26h,endpoints=1h".
+func ParseStaleAfter(s string) (map[string]time.Duration, error) {
+	out := map[string]time.Duration{}
+	for _, e := range strings.Split(s, ",") {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		name, v, ok := strings.Cut(e, "=")
+		name = strings.TrimSpace(name)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("%q: want <source>=<duration>", e)
+		}
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("%q: want a positive duration", e)
+		}
+		out[name] = d
+	}
+	return out, nil
 }
 
 // snapshot is the archived message of a snapshot collector.
@@ -344,7 +377,7 @@ func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Opt
 			slog.Warn("no snapshot in the window", "source", t.Source.Name, "target", c, "days", o.LookbackDays)
 			continue
 		}
-		st := ClusterState{Source: t.Source.Name, Cluster: c, Lab: o.Labs.Of(c), SnapshotAt: latest.At, Stale: now.Sub(latest.At) > o.StaleAfter, Open: len(latest.Items)}
+		st := ClusterState{Source: t.Source.Name, Cluster: c, Lab: o.Labs.Of(c), SnapshotAt: latest.At, Stale: now.Sub(latest.At) > o.staleAfter(t.Source.Name), Open: len(latest.Items)}
 		for _, it := range latest.Items {
 			f := Finding{
 				Fingerprint: it.Fingerprint, Source: t.Source.Name, Cluster: c,

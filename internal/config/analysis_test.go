@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClusterAnalysisConfig(t *testing.T) {
@@ -27,6 +28,14 @@ func TestClusterAnalysisConfig(t *testing.T) {
 	if c.ScoutURL != "" {
 		t.Errorf("scout url %q", c.ScoutURL)
 	}
+	if a.StaleAfterBySource["vm"] != 26*time.Hour || len(a.StaleAfterBySource) != 1 {
+		t.Errorf("stale default %v", a.StaleAfterBySource)
+	}
+	t.Setenv("ANALYSIS_STALE_AFTER", "vm=x")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ANALYSIS_STALE_AFTER") {
+		t.Errorf("invalid ANALYSIS_STALE_AFTER accepted: %v", err)
+	}
+	t.Setenv("ANALYSIS_STALE_AFTER", "")
 	if a.Labs != nil {
 		t.Errorf("labs without ANALYSIS_LABS: %+v", a.Labs)
 	}

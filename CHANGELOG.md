@@ -1,3 +1,10 @@
+# [0.10.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.9.0...v0.10.0) (2026-11-15)
+
+
+### Features
+
+* **cluster-analysis:** group the fleet report by lab (ANALYSIS_LABS) ([#27](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/27)) ([5cbf786](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/5cbf78625889378c46a841fd50c53bd0d4cdc68e)), closes [#26](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/26)
+
 # [0.9.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.8.0...v0.9.0) (2026-11-14)
 
 

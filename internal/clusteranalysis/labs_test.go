@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseLabs(t *testing.T) {
@@ -83,5 +84,33 @@ func TestReportWithoutLabsUnchanged(t *testing.T) {
 	md := r.Markdown()
 	if r.Labs != nil || strings.Contains(md, "Lab") || !strings.Contains(md, "| Bereich | System | Offen | Neu | Snapshot |") {
 		t.Fatalf("labs leaked into an ungrouped report:\n%s", md)
+	}
+}
+
+func TestStaleAfterPerSource(t *testing.T) {
+	m, err := ParseStaleAfter(" vm=26h , endpoints=1h,")
+	if err != nil || m["vm"] != 26*time.Hour || m["endpoints"] != time.Hour {
+		t.Fatalf("%v %v", m, err)
+	}
+	for _, bad := range []string{"vm", "=1h", "vm=0s", "vm=x"} {
+		if _, err := ParseStaleAfter(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	// cluster b's snapshot is 5h old: stale at 3h, not with an override of 6h.
+	o := opts
+	in, _ := Build(context.Background(), fixture(), now, nil, o)
+	o.StaleAfterBySource = map[string]time.Duration{"k8sgpt": 6 * time.Hour}
+	in2, _ := Build(context.Background(), fixture(), now, nil, o)
+	stale := func(in Input) bool {
+		for _, c := range in.Clusters {
+			if c.Cluster == "b" {
+				return c.Stale
+			}
+		}
+		return false
+	}
+	if !stale(in) || stale(in2) {
+		t.Errorf("stale without override %v, with %v", stale(in), stale(in2))
 	}
 }

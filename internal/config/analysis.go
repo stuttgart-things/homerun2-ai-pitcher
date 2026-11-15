@@ -42,6 +42,7 @@ type Analysis struct {
 	InventoryStaleAfter time.Duration
 	LookbackDays        int
 	StaleAfter          time.Duration
+	StaleAfterBySource  map[string]time.Duration
 	MaxPerCluster       int
 	ReportURL           string // link in the pitch, e.g. the portal's /archive/?tab=analyses
 	ClaudeBin           string
@@ -69,6 +70,9 @@ func loadAnalysis(c *Config) error {
 	}
 	if a.Labs, err = clusteranalysis.ParseLabs(getEnv("ANALYSIS_LABS", "")); err != nil {
 		return fmt.Errorf("invalid ANALYSIS_LABS: %w", err)
+	}
+	if a.StaleAfterBySource, err = clusteranalysis.ParseStaleAfter(getEnv("ANALYSIS_STALE_AFTER", "vm=26h")); err != nil {
+		return fmt.Errorf("invalid ANALYSIS_STALE_AFTER: %w", err)
 	}
 	a.InventoryPrefix = getEnv("ANALYSIS_INVENTORY_PREFIX", "inventory-")
 	a.IssuesMode = getEnv("ISSUES_MODE", "off")

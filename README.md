@@ -150,6 +150,7 @@ k8s-cluster-report (read-only user)
 | `REPORT_BUCKET`, `REPORT_ACCESS_KEY`, `REPORT_SECRET_KEY` | `k8s-cluster-analysis`, **required** | writer of the reports |
 | `ANALYSIS_SOURCES` | `k8sgpt,endpoints,vm` | sources, archive prefix `system=<name>-<target>/`; `name=prefix` sets another prefix |
 | `ANALYSIS_LABS` | — | groups the report by lab (#26): `LabUL=platform-sthings,*-labul;LabDA=sthings-app*,labda-*`, target name globs, first match wins; per-lab table, lab column, labs per topic, per-lab line in the pitch. Empty: no grouping |
+| `ANALYSIS_STALE_AFTER` | `vm=26h` | per-source override of `STALE_AFTER` (#28): VM health reports come daily. Empty: `STALE_AFTER` for all |
 | `LOOKBACK_DAYS` | `7` | days of snapshots per system |
 | `ANALYSIS_INVENTORY_PREFIX` / `INVENTORY_STALE_AFTER` | `inventory-` / `36h` | the clusters' inventory (k8s-pitcher#108) as context, #21 |
 | `ISSUES_MODE` | `off` | `off`, `dry-run` (report says what it would file), `on` — GitHub issues from the analysis, #22 |

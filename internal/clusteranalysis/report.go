@@ -74,6 +74,7 @@ type Stats struct {
 type ClusterLine struct {
 	Source     string    `json:"source,omitempty"`
 	Cluster    string    `json:"cluster"`
+	Lab        string    `json:"lab,omitempty"`
 	SnapshotAt time.Time `json:"snapshotAt"`
 	Open       int       `json:"open"`
 	New        int       `json:"new"`
@@ -82,17 +83,20 @@ type ClusterLine struct {
 
 // Report is what one run stores: analysis/date=<day>/<RunID>.json (+ .md).
 type Report struct {
-	Version      int           `json:"version"`
-	RunID        string        `json:"runId"`
-	GeneratedAt  time.Time     `json:"generatedAt"`
-	Model        string        `json:"model,omitempty"`
-	CostUSD      float64       `json:"costUsd,omitempty"`
-	LookbackDays int           `json:"lookbackDays"`
-	Severity     string        `json:"severity"`
-	Stats        Stats         `json:"stats"`
-	Clusters     []ClusterLine `json:"clusters"`
-	Summary      string        `json:"summary"`
-	Topics       []Topic       `json:"topics"`
+	Version      int       `json:"version"`
+	RunID        string    `json:"runId"`
+	GeneratedAt  time.Time `json:"generatedAt"`
+	Model        string    `json:"model,omitempty"`
+	CostUSD      float64   `json:"costUsd,omitempty"`
+	LookbackDays int       `json:"lookbackDays"`
+	Severity     string    `json:"severity"`
+	Stats        Stats     `json:"stats"`
+	// Labs are the numbers per lab in configured order, targets without a lab
+	// last (#26); empty without ANALYSIS_LABS.
+	Labs     []LabStats    `json:"labs,omitempty"`
+	Clusters []ClusterLine `json:"clusters"`
+	Summary  string        `json:"summary"`
+	Topics   []Topic       `json:"topics"`
 	// OpenFindings are the next run's baseline for new and resolved.
 	OpenFindings []Ref `json:"openFindings"`
 	// Versions is the inventory context (#21), copied from the input.
@@ -113,7 +117,7 @@ func NewReport(in Input, runID string) *Report {
 	r.Stats.Clusters = len(in.Clusters)
 	r.Stats.Resolved = len(in.Resolved)
 	for _, c := range in.Clusters {
-		line := ClusterLine{Source: c.Source, Cluster: c.Cluster, SnapshotAt: c.SnapshotAt, Open: c.Open, Stale: c.Stale}
+		line := ClusterLine{Source: c.Source, Cluster: c.Cluster, Lab: c.Lab, SnapshotAt: c.SnapshotAt, Open: c.Open, Stale: c.Stale}
 		for _, f := range c.Findings {
 			if f.New {
 				line.New++
@@ -134,7 +138,63 @@ func NewReport(in Input, runID string) *Report {
 		r.Clusters = append(r.Clusters, line)
 	}
 	r.Severity = Severity(r.Stats)
+	r.Labs = labStats(in.Labs, r.Clusters)
 	return r
+}
+
+// labStats counts per lab, in the configured order, "" (no match) last and
+// only when a target has no lab. Nil without labs.
+func labStats(labs []string, lines []ClusterLine) []LabStats {
+	if len(labs) == 0 {
+		return nil
+	}
+	idx := map[string]int{}
+	out := make([]LabStats, 0, len(labs)+1)
+	for _, l := range labs {
+		idx[l] = len(out)
+		out = append(out, LabStats{Lab: l})
+	}
+	for _, c := range lines {
+		i, ok := idx[c.Lab]
+		if !ok {
+			i = len(out)
+			idx[c.Lab] = i
+			out = append(out, LabStats{Lab: c.Lab})
+		}
+		out[i].Systems++
+		out[i].Open += c.Open
+		out[i].New += c.New
+	}
+	return out
+}
+
+// labOrder is the position of a lab in the report's lab list, unknown last.
+func (r *Report) labOrder(lab string) int {
+	for i, l := range r.Labs {
+		if l.Lab == lab {
+			return i
+		}
+	}
+	return len(r.Labs)
+}
+
+// topicLabs are the labs of a topic's targets, in report order.
+func (r *Report) topicLabs(t Topic) []string {
+	in := map[string]bool{}
+	for _, name := range t.Clusters {
+		for _, c := range r.Clusters {
+			if c.Cluster == name {
+				in[c.Lab] = true
+			}
+		}
+	}
+	var out []string
+	for _, l := range r.Labs {
+		if in[l.Lab] {
+			out = append(out, labName(l.Lab))
+		}
+	}
+	return out
 }
 
 // Severity follows from the counts (homerun-library#135: the model never
@@ -223,6 +283,13 @@ func (r *Report) Markdown() string {
 	if len(r.Stats.Stale) > 0 {
 		fmt.Fprintf(&b, "> **Keine aktuellen Snapshots** von: %s — dort ist der Stand veraltet.\n\n", strings.Join(r.Stats.Stale, ", "))
 	}
+	if len(r.Labs) > 0 {
+		b.WriteString("| Lab | Systeme | Offen | Neu |\n|---|---:|---:|---:|\n")
+		for _, l := range r.Labs {
+			fmt.Fprintf(&b, "| %s | %d | %d | %d |\n", labName(l.Lab), l.Systems, l.Open, l.New)
+		}
+		b.WriteString("\n")
+	}
 	if r.Summary != "" {
 		fmt.Fprintf(&b, "## Zusammenfassung\n\n%s\n\n", r.Summary)
 	}
@@ -233,8 +300,12 @@ func (r *Report) Markdown() string {
 		b.WriteString("## Themen\n\n")
 		for i, t := range r.Topics {
 			fmt.Fprintf(&b, "### %d. %s\n\n", i+1, t.Title)
-			fmt.Fprintf(&b, "- **Systeme:** %s\n- **Funde:** %s\n- **Konfidenz:** %s · **Vorschlag als:** %s\n\n",
-				strings.Join(t.Clusters, ", "), code(t.Fingerprints), t.Confidence, t.Action)
+			fmt.Fprintf(&b, "- **Systeme:** %s\n", strings.Join(t.Clusters, ", "))
+			if labs := r.topicLabs(t); len(labs) > 0 {
+				fmt.Fprintf(&b, "- **Labs:** %s\n", strings.Join(labs, ", "))
+			}
+			fmt.Fprintf(&b, "- **Funde:** %s\n- **Konfidenz:** %s · **Vorschlag als:** %s\n\n",
+				code(t.Fingerprints), t.Confidence, t.Action)
 			if t.Assessment != "" {
 				fmt.Fprintf(&b, "%s\n\n", t.Assessment)
 			}
@@ -243,9 +314,17 @@ func (r *Report) Markdown() string {
 			}
 		}
 	}
-	b.WriteString("## Systeme\n\n| Bereich | System | Offen | Neu | Snapshot |\n|---|---|---:|---:|---|\n")
+	grouped := len(r.Labs) > 0
+	if grouped {
+		b.WriteString("## Systeme\n\n| Lab | Bereich | System | Offen | Neu | Snapshot |\n|---|---|---|---:|---:|---|\n")
+	} else {
+		b.WriteString("## Systeme\n\n| Bereich | System | Offen | Neu | Snapshot |\n|---|---|---:|---:|---|\n")
+	}
 	lines := append([]ClusterLine(nil), r.Clusters...)
 	sort.SliceStable(lines, func(a, c int) bool {
+		if grouped && lines[a].Lab != lines[c].Lab {
+			return r.labOrder(lines[a].Lab) < r.labOrder(lines[c].Lab)
+		}
 		if area(lines[a].Source) != area(lines[c].Source) {
 			return area(lines[a].Source) < area(lines[c].Source)
 		}
@@ -255,6 +334,9 @@ func (r *Report) Markdown() string {
 		stale := ""
 		if c.Stale {
 			stale = " ⚠ veraltet"
+		}
+		if grouped {
+			fmt.Fprintf(&b, "| %s ", labName(c.Lab))
 		}
 		fmt.Fprintf(&b, "| %s | %s | %d | %d | %s%s |\n", area(c.Source), c.Cluster, c.Open, c.New, c.SnapshotAt.Format("2006-01-02 15:04"), stale)
 	}

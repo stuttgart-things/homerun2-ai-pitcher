@@ -30,6 +30,7 @@ type Analysis struct {
 	ReportKey       string
 	ReportSecret    string
 	Sources         []clusteranalysis.Source
+	Labs            clusteranalysis.Labs
 	InventoryPrefix string
 	// GitHub issues from the analysis (#22).
 	IssuesMode          string
@@ -65,6 +66,9 @@ func loadAnalysis(c *Config) error {
 	var err error
 	if a.Sources, err = clusteranalysis.ParseSources(getEnv("ANALYSIS_SOURCES", "k8sgpt,endpoints,vm")); err != nil {
 		return fmt.Errorf("invalid ANALYSIS_SOURCES: %w", err)
+	}
+	if a.Labs, err = clusteranalysis.ParseLabs(getEnv("ANALYSIS_LABS", "")); err != nil {
+		return fmt.Errorf("invalid ANALYSIS_LABS: %w", err)
 	}
 	a.InventoryPrefix = getEnv("ANALYSIS_INVENTORY_PREFIX", "inventory-")
 	a.IssuesMode = getEnv("ISSUES_MODE", "off")

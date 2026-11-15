@@ -446,3 +446,13 @@ func TestClusterAnalysisMessageIssueLinks(t *testing.T) {
 		t.Errorf("tags %q", m.Tags)
 	}
 }
+
+func TestClusterAnalysisMessageLabs(t *testing.T) {
+	r := &clusteranalysis.Report{RunID: "r1", Labs: []clusteranalysis.LabStats{
+		{Lab: "LabUL", Systems: 9, Open: 20, New: 1}, {Lab: "LabDA", Systems: 6, Open: 5}, {Lab: "", Systems: 1, Open: 0},
+	}}
+	m := clusterAnalysisMessage(&config.Config{}, r)
+	if !strings.Contains(m.Message, "LabUL: 20 open, 1 new on 9 · LabDA: 5 open, 0 new on 6 · no lab: 0 open, 0 new on 1") {
+		t.Fatalf("message = %q", m.Message)
+	}
+}

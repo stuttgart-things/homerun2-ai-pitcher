@@ -55,7 +55,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: ko-build/setup-ko@v0.9
+      - uses: ko-build/setup-ko@v0.10
       - name: ko build on the Claude Code base
         env:
           KO_DOCKER_REPO: ghcr.io/stuttgart-things/homerun2-ai-pitcher

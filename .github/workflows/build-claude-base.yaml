@@ -31,7 +31,7 @@ jobs:
       - name: CLI version from the Dockerfile
         id: v
         run: echo "version=$(sed -n 's/^ARG CLAUDE_CODE_VERSION=//p' images/claude-code/Dockerfile)" >> "$GITHUB_OUTPUT"
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

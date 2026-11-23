@@ -129,12 +129,15 @@ func runClusterAnalysis(cfg *config.Config) int {
 	reportB := open(a.ReportBucket, a.ReportKey, a.ReportSecret)
 	ai := &claudecode.Runner{Bin: a.ClaudeBin, Model: a.ClaudeModel, MaxBudget: a.ClaudeBudget, Timeout: a.ClaudeTimeout}
 
+	if a.Known != nil {
+		slog.Info("known findings loaded", "file", a.KnownFile, "entries", len(a.Known.Entries))
+	}
 	res, err := clusteranalysis.Run(ctx, archiveB, reportB, ai, time.Now(), clusteranalysis.Config{
 		Options: clusteranalysis.Options{
 			Sources: a.Sources, LookbackDays: a.LookbackDays, StaleAfter: a.StaleAfter, StaleAfterBySource: a.StaleAfterBySource,
 			InventoryPrefix: a.InventoryPrefix, InventoryStaleAfter: a.InventoryStaleAfter,
 			MaxFindingsPerClu: a.MaxPerCluster, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3,
-			Labs: a.Labs,
+			Labs: a.Labs, Known: a.Known,
 		},
 		Language: cfg.Language, DryRun: cfg.DryRun, Attempts: a.ClaudeAttempts,
 		Issues: issueSyncer(cfg),
@@ -144,7 +147,7 @@ func runClusterAnalysis(cfg *config.Config) int {
 		return 1
 	}
 	r := res.Report
-	slog.Info("cluster analysis", "clusters", r.Stats.Clusters, "open", r.Stats.Open, "new", r.Stats.New,
+	slog.Info("cluster analysis", "clusters", r.Stats.Clusters, "open", r.Stats.Open, "known", r.Stats.Known, "new", r.Stats.New,
 		"resolved", r.Stats.Resolved, "topics", len(r.Topics), "model", r.Model, "costUsd", r.CostUSD,
 		"assessmentError", r.AssessmentError, "report", res.JSONKey)
 
@@ -214,6 +217,17 @@ func clusterAnalysisMessage(cfg *config.Config, r *clusteranalysis.Report) pitch
 	}
 	if len(r.Stats.Stale) > 0 {
 		fmt.Fprintf(&b, "\n\nNo current snapshot: %s", strings.Join(r.Stats.Stale, ", "))
+	}
+	// Known findings (#4831): accepted in git, not counted as open.
+	if r.Stats.Known > 0 {
+		fmt.Fprintf(&b, "\n\nAccepted as known (not counted): %d", r.Stats.Known)
+	}
+	if r.Known != nil && len(r.Known.Expired) > 0 {
+		var ids []string
+		for _, e := range r.Known.Expired {
+			ids = append(ids, e.ID)
+		}
+		fmt.Fprintf(&b, "\n\nKnown-findings acceptance expired: %s", strings.Join(ids, ", "))
 	}
 	tags := "ai,cluster-analysis,report=" + r.RunID
 	if len(numbers) > 0 {

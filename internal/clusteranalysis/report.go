@@ -68,6 +68,9 @@ type Stats struct {
 	Resolved  int      `json:"resolved"`
 	Recurring int      `json:"recurring"`
 	Stale     []string `json:"stale,omitempty"`
+	// Known are the open findings accepted in the known-findings file
+	// (#4831), not in Open.
+	Known int `json:"known,omitempty"`
 }
 
 // ClusterLine is one target of one source in the report.
@@ -78,6 +81,7 @@ type ClusterLine struct {
 	SnapshotAt time.Time `json:"snapshotAt"`
 	Open       int       `json:"open"`
 	New        int       `json:"new"`
+	Known      int       `json:"known,omitempty"`
 	Stale      bool      `json:"stale,omitempty"`
 }
 
@@ -102,6 +106,8 @@ type Report struct {
 	// Versions is the inventory context (#21), copied from the input.
 	Versions *Versions `json:"versions,omitempty"`
 	Resolved []Ref     `json:"resolved,omitempty"`
+	// Known is what the known-findings file did (#4831), copied from the input.
+	Known *KnownState `json:"knownFindings,omitempty"`
 	// Issues are the GitHub issues this run created, commented or would
 	// have (dry run), #22.
 	Issues      []IssueAction `json:"issues,omitempty"`
@@ -113,11 +119,11 @@ type Report struct {
 
 // NewReport fills everything but the model's assessment from the input.
 func NewReport(in Input, runID string) *Report {
-	r := &Report{Version: 1, RunID: runID, GeneratedAt: in.GeneratedAt, LookbackDays: in.LookbackDays, Resolved: in.Resolved, Versions: in.Versions}
+	r := &Report{Version: 1, RunID: runID, GeneratedAt: in.GeneratedAt, LookbackDays: in.LookbackDays, Resolved: in.Resolved, Versions: in.Versions, Known: in.Known}
 	r.Stats.Clusters = len(in.Clusters)
 	r.Stats.Resolved = len(in.Resolved)
 	for _, c := range in.Clusters {
-		line := ClusterLine{Source: c.Source, Cluster: c.Cluster, Lab: c.Lab, SnapshotAt: c.SnapshotAt, Open: c.Open, Stale: c.Stale}
+		line := ClusterLine{Source: c.Source, Cluster: c.Cluster, Lab: c.Lab, SnapshotAt: c.SnapshotAt, Open: c.Open, Known: c.Known, Stale: c.Stale}
 		for _, f := range c.Findings {
 			if f.New {
 				line.New++
@@ -131,6 +137,7 @@ func NewReport(in Input, runID string) *Report {
 			r.OpenFindings = append(r.OpenFindings, Ref{Fingerprint: f.Fingerprint, Source: f.Source, Cluster: f.Cluster, Kind: f.Kind, Name: f.Name})
 		}
 		r.Stats.Open += c.Open
+		r.Stats.Known += c.Known
 		r.Stats.New += line.New
 		if c.Stale {
 			r.Stats.Stale = append(r.Stats.Stale, c.Source+"/"+c.Cluster)
@@ -219,11 +226,15 @@ func Severity(s Stats) string {
 // must not invent findings), topics without any known fingerprint go.
 func (r *Report) Apply(a Assessment, in Input) (dropped int) {
 	known := map[string]bool{}
+	accepted := map[string]bool{} // in the known-findings file (#4831)
 	clusters := map[string]bool{}
 	for _, c := range in.Clusters {
 		clusters[c.Cluster] = true
 		for _, f := range c.Findings {
 			known[f.Fingerprint] = true
+			if f.Known != "" {
+				accepted[f.Fingerprint] = true
+			}
 		}
 	}
 	for _, ref := range in.Resolved {
@@ -234,6 +245,9 @@ func (r *Report) Apply(a Assessment, in Input) (dropped int) {
 	for _, t := range a.Topics {
 		var fps, cs []string
 		for _, fp := range t.Fingerprints {
+			if accepted[fp] {
+				continue // accepted by the team: never a topic
+			}
 			if known[fp] {
 				fps = append(fps, fp)
 			} else {
@@ -280,6 +294,16 @@ func (r *Report) Markdown() string {
 	fmt.Fprintf(&b, "**%d %s** auf %d %s · %d neu · %d behoben · %d wiederkehrend · Schweregrad `%s`\n\n",
 		r.Stats.Open, plural(r.Stats.Open, "offener Fund", "offene Funde"), r.Stats.Clusters, plural(r.Stats.Clusters, "System", "Systemen"),
 		r.Stats.New, r.Stats.Resolved, r.Stats.Recurring, r.Severity)
+	if r.Stats.Known > 0 {
+		fmt.Fprintf(&b, "%d %s als bekannt akzeptiert (nicht mitgezählt).\n\n", r.Stats.Known, plural(r.Stats.Known, "weiterer Fund", "weitere Funde"))
+	}
+	if r.Known != nil && len(r.Known.Expired) > 0 {
+		ids := make([]string, 0, len(r.Known.Expired))
+		for _, e := range r.Known.Expired {
+			ids = append(ids, e.ID)
+		}
+		fmt.Fprintf(&b, "> **Akzeptanz abgelaufen:** %s — diese Funde zählen wieder als offen.\n\n", code(ids))
+	}
 	if len(r.Stats.Stale) > 0 {
 		fmt.Fprintf(&b, "> **Keine aktuellen Snapshots** von: %s — dort ist der Stand veraltet.\n\n", strings.Join(r.Stats.Stale, ", "))
 	}
@@ -343,6 +367,7 @@ func (r *Report) Markdown() string {
 	if r.Versions != nil {
 		r.Versions.markdown(&b)
 	}
+	r.knownMarkdown(&b)
 	if len(r.Resolved) > 0 {
 		b.WriteString("\n## Behoben seit dem letzten Bericht\n\n")
 		for _, f := range r.Resolved {
@@ -401,4 +426,37 @@ func code(items []string) string {
 		q[i] = "`" + s + "`"
 	}
 	return strings.Join(q, ", ")
+}
+
+// knownMarkdown lists the known-findings entries (#4831): the accepted
+// findings, the expired acceptances and the entries that matched nothing.
+func (r *Report) knownMarkdown(b *strings.Builder) {
+	k := r.Known
+	if k == nil || len(k.Matched)+len(k.Expired)+len(k.Unused) == 0 {
+		return
+	}
+	line := func(e KnownRef) {
+		fmt.Fprintf(b, "| `%s` | %d | %s | %s | %s | %s |", e.ID, e.Count, strings.Join(e.Systems, ", "),
+			strings.ReplaceAll(e.Reason, "|", "\\|"), e.Owner, e.Expires)
+		b.WriteString("\n")
+	}
+	head := "| Eintrag | Funde | Systeme | Begründung | Owner | Bis |\n|---|---:|---|---|---|---|\n"
+	if len(k.Matched) > 0 {
+		b.WriteString("\n## Bekannte Funde\n\nAkzeptiert in der Datei known-findings, nicht als offen gezählt.\n\n" + head)
+		for _, e := range k.Matched {
+			line(e)
+		}
+	}
+	if len(k.Expired) > 0 {
+		b.WriteString("\n## Akzeptanz abgelaufen\n\nDiese Einträge wirken nicht mehr; ihre Funde zählen wieder als offen. Verlängern (mit Begründung) oder löschen.\n\n" + head)
+		for _, e := range k.Expired {
+			line(e)
+		}
+	}
+	if len(k.Unused) > 0 {
+		b.WriteString("\n## Ungenutzte Einträge\n\nTreffen heute keinen offenen Fund — vermutlich behoben, dann aus der Datei löschen.\n\n" + head)
+		for _, e := range k.Unused {
+			line(e)
+		}
+	}
 }

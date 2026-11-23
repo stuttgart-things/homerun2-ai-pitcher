@@ -157,6 +157,7 @@ The input is a JSON condensation of the latest snapshot per source and target ("
 
 Rules:
 - Group findings into topics: one underlying problem, possibly on several targets or sources (a certificate about to expire may show up as an endpoint and a VM finding). Prefer cross-target and recurring problems, findings with severity error or critical, and new ones; skip noise that needs no attention.
+- A finding with "known" set is accepted by the team (the reason is in "knownReason", from a file in git): it is not a problem to report. Never make it a topic, never name its fingerprint, do not propose fixes for it; "open" counts exclude it. You may mention in the summary how many findings are accepted as known. "knownFindings.expired" are acceptances that ran out: their findings are open again, say so if they matter.
 - Call a finding new only if its "new" flag is true. Without a previous report (previousReport empty) nothing is new: do not write "new since the last report" then.
 - Name only fingerprints and targets from the input. Never invent findings, objects, clusters or hosts.
 - assessment: what the problem most likely is and why it matters, grounded in the error texts. Say when the evidence is thin.

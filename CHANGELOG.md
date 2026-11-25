@@ -1,3 +1,10 @@
+## [0.11.1](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.11.0...v0.11.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **deps:** update module go.yaml.in/yaml/v3 to v3.0.6 ([#31](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/31)) ([b0fe4a2](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/b0fe4a271125d7dc2df01449ffd6692380ceb741))
+
 # [0.11.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.10.1...v0.11.0) (2026-11-23)
 
 

@@ -1,3 +1,10 @@
+## [0.11.2](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.11.1...v0.11.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **llm:** name the real cause of failed model calls; timeout per model ([#33](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/33)) ([a552a38](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/a552a3821772f45498cb5c0ab184c470aa1ffec9)), closes [#11](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/11)
+
 ## [0.11.1](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.11.0...v0.11.1) (2026-11-25)
 
 

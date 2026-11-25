@@ -32,6 +32,10 @@ type Analysis struct {
 	Sources         []clusteranalysis.Source
 	Labs            clusteranalysis.Labs
 	InventoryPrefix string
+	// Known-findings file (stuttgart-things#4831): ANALYSIS_KNOWN_FINDINGS,
+	// read and validated at start; empty path: none.
+	KnownFile string
+	Known     *clusteranalysis.KnownFindings
 	// GitHub issues from the analysis (#22).
 	IssuesMode          string
 	IssuesRepo          string
@@ -75,6 +79,11 @@ func loadAnalysis(c *Config) error {
 		return fmt.Errorf("invalid ANALYSIS_STALE_AFTER: %w", err)
 	}
 	a.InventoryPrefix = getEnv("ANALYSIS_INVENTORY_PREFIX", "inventory-")
+	if a.KnownFile = getEnv("ANALYSIS_KNOWN_FINDINGS", ""); a.KnownFile != "" {
+		if a.Known, err = clusteranalysis.LoadKnownFile(a.KnownFile); err != nil {
+			return fmt.Errorf("invalid ANALYSIS_KNOWN_FINDINGS: %w", err)
+		}
+	}
 	a.IssuesMode = getEnv("ISSUES_MODE", "off")
 	a.IssuesRepo = getEnv("ISSUES_REPO", "stuttgart-things/stuttgart-things")
 	a.IssuesToken = getEnv("GITHUB_TOKEN", "")

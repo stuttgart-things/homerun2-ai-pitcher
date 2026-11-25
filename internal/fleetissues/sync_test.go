@@ -242,3 +242,32 @@ func TestOneIssuePerFindingsPerRun(t *testing.T) {
 		}
 	}
 }
+
+// Known findings (#4831): no issue for them, and an open issue whose
+// findings are all known is resolved with a note on the file.
+func TestKnownFindingsFileNoIssues(t *testing.T) {
+	rep, in := input()
+	for i := range in.Clusters {
+		for j := range in.Clusters[i].Findings {
+			if f := &in.Clusters[i].Findings[j]; f.Fingerprint == "fp-disk" || f.Fingerprint == "fp-ntp1" || f.Fingerprint == "fp-ntp2" {
+				f.Known = "accepted"
+			}
+		}
+	}
+	old := Issue{Number: 7, Title: "NTP", Labels: []string{"fleet-analysis"}, UpdatedAt: now,
+		Body: "x\n<!-- fleet-fp: fp-ntp1,fp-ntp2 -->\n<!-- fleet-sys: vm/sthings-app,vm/sthings-app-2 -->\n"}
+	f := newFake(old)
+	acts, err := (&Syncer{Client: f, Cfg: cfg(ModeOn)}).Sync(context.Background(), rep, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the pr-proposal topic on fp-svc is left; NTP and the new disk
+	// error are known.
+	if len(f.created) != 1 || f.created[0].Title != "Paketquelle per Git" {
+		t.Errorf("created %+v", f.created)
+	}
+	if len(f.comments[7]) != 1 || !strings.Contains(f.comments[7][0], "als bekannt akzeptiert") ||
+		strings.Join(f.labels[7], ",") != "fleet-analysis/resolved" {
+		t.Errorf("issue 7: comments %v labels %v acts %+v", f.comments[7], f.labels[7], acts)
+	}
+}

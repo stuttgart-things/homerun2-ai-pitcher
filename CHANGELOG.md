@@ -1,3 +1,10 @@
+# [0.12.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.11.2...v0.12.0) (2026-11-25)
+
+
+### Features
+
+* **incident:** correlate alerts per fingerprint and group them into incidents ([#34](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/34)) ([b6f60f2](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/b6f60f28eb650f5dbc8a283084e7dadc84a17845)), closes [#5](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/5) [#33](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/33) [#5](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/5)
+
 ## [0.11.2](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.11.1...v0.11.2) (2026-11-25)
 
 

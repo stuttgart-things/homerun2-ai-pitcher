@@ -36,6 +36,7 @@ type Incident struct {
 	Quiet     time.Duration
 	MinAlerts int
 	AI        bool
+	AIBudget  time.Duration
 	Location  *time.Location
 	Batch     int
 	Block     time.Duration
@@ -97,6 +98,7 @@ func loadIncident(c *Config) error {
 		{"INCIDENT_QUIET", "5m", &i.Quiet},
 		{"INCIDENT_CLAIM_IDLE", "5m", &i.ClaimIdle},
 		{"INCIDENT_BLOCK", "5s", &i.Block},
+		{"INCIDENT_AI_BUDGET", "2m", &i.AIBudget},
 	}
 	for _, x := range durs {
 		v, err := time.ParseDuration(getEnv(x.env, x.def))

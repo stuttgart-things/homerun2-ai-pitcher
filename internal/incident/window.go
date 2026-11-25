@@ -43,6 +43,10 @@ type WindowOptions struct {
 	// single key is the correlation's business.
 	MinKeys  int
 	Language string
+	// AIBudget caps the window's model call, retries included (default 2m):
+	// while it runs, the stream waits. The client splits it fairly over
+	// the model list (#11), so the fallback models still get their turn.
+	AIBudget time.Duration
 }
 
 func (o WindowOptions) defaults() WindowOptions {
@@ -57,6 +61,9 @@ func (o WindowOptions) defaults() WindowOptions {
 	}
 	if o.Language == "" {
 		o.Language = "German"
+	}
+	if o.AIBudget <= 0 {
+		o.AIBudget = 2 * time.Minute
 	}
 	return o
 }
@@ -248,7 +255,9 @@ func (s *Summarizer) causes(ctx context.Context, groups []Group, o WindowOptions
 	if err != nil {
 		return out, "", err
 	}
-	res, err := s.AI.Complete(ctx, causePrompt(o.Language), string(raw))
+	actx, cancel := context.WithTimeout(ctx, o.AIBudget)
+	defer cancel()
+	res, err := s.AI.Complete(actx, causePrompt(o.Language), string(raw))
 	if err != nil {
 		slog.Warn("AI incident cause unavailable, deterministic summary only", "error", err)
 		return out, "", err
@@ -271,7 +280,7 @@ func (s *Summarizer) causes(ctx context.Context, groups []Group, o WindowOptions
 		out[i-1] = truncate(text, 300)
 		kept++
 	}
-	slog.Info("AI incident causes", "model", res.Model, "groups", len(groups), "kept", kept)
+	slog.Info("AI incident causes", "model", res.Model, "finishReason", res.FinishReason, "groups", len(groups), "kept", kept)
 	if kept == 0 {
 		return out, res.Model, fmt.Errorf("no usable line in the answer of %s", res.Model)
 	}

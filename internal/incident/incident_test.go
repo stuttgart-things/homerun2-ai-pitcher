@@ -419,3 +419,28 @@ func TestPrune(t *testing.T) {
 		t.Errorf("after prune: %+v", all)
 	}
 }
+
+// slowAI waits for its context: the window's budget must end the call.
+type slowAI struct{ deadline time.Time }
+
+func (s *slowAI) Complete(ctx context.Context, _, _ string) (*llm.Result, error) {
+	s.deadline, _ = ctx.Deadline()
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestSummaryAIBudget(t *testing.T) {
+	w := windowOf(
+		alert("A", "firing", "a", "c1", "ns", "error", t0),
+		alert("B", "firing", "b", "c1", "ns", "error", t0.Add(time.Minute)),
+	)
+	ai := &slowAI{}
+	start := time.Now()
+	msgs := (&Summarizer{AI: ai, Opt: WindowOptions{AIBudget: 50 * time.Millisecond}}).Summarize(context.Background(), w)
+	if time.Since(start) > 2*time.Second || ai.deadline.IsZero() {
+		t.Fatalf("budget not applied (deadline %v)", ai.deadline)
+	}
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Message, "[AI n/a]") || !strings.Contains(msgs[0].Message, "- 08:00 A") {
+		t.Errorf("fail-open after the budget: %+v", msgs)
+	}
+}

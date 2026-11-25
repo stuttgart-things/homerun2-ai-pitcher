@@ -1,3 +1,10 @@
+# [0.11.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.10.1...v0.11.0) (2026-11-23)
+
+
+### Features
+
+* **cluster-analysis:** known-findings file (ANALYSIS_KNOWN_FINDINGS) ([#30](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/30)) ([7d8bdb1](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/7d8bdb16166f685144d3c03dc0c4d4955910b1db)), closes [stuttgart-things/stuttgart-things#4831](https://github.com/stuttgart-things/stuttgart-things/issues/4831)
+
 ## [0.10.1](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.10.0...v0.10.1) (2026-11-15)
 
 

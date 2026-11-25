@@ -157,6 +157,9 @@ func candidates(rep *ca.Report, in ca.Input) []candidate {
 	open := map[string]finding{}
 	for _, st := range in.Clusters {
 		for _, f := range st.Findings {
+			if f.Known != "" {
+				continue // accepted in the known-findings file: no issue (#4831)
+			}
 			open[f.Fingerprint] = finding{Finding: f, system: st.Source + "/" + st.Cluster}
 		}
 	}
@@ -314,14 +317,20 @@ func (s *Syncer) Sync(ctx context.Context, rep *ca.Report, in ca.Input) ([]ca.Is
 
 	// Resolved: every fingerprint of the issue is gone while each of its
 	// systems still reports (a system without snapshots resolves nothing).
+	// A finding accepted as known (#4831) keeps no issue open.
 	open := map[string]bool{}
+	accepted := map[string]bool{}
 	reporting := map[string]bool{}
 	for _, st := range in.Clusters {
 		if !st.Stale {
 			reporting[st.Source+"/"+st.Cluster] = true
 		}
 		for _, f := range st.Findings {
-			open[f.Fingerprint] = true
+			if f.Known != "" {
+				accepted[f.Fingerprint] = true
+			} else {
+				open[f.Fingerprint] = true
+			}
 		}
 	}
 	for _, iss := range existing {
@@ -332,10 +341,13 @@ func (s *Syncer) Sync(ctx context.Context, rep *ca.Report, in ca.Input) ([]ca.Is
 		if len(fps) == 0 || len(systems) == 0 {
 			continue // not ours
 		}
-		gone := true
+		gone, viaKnown := true, false
 		for _, fp := range fps {
 			if open[fp] {
 				gone = false
+			}
+			if accepted[fp] {
+				viaKnown = true
 			}
 		}
 		for _, sys := range systems {
@@ -349,6 +361,9 @@ func (s *Syncer) Sync(ctx context.Context, rep *ca.Report, in ca.Input) ([]ca.Is
 		a := ca.IssueAction{Action: verb("resolve"), Title: iss.Title, Number: iss.Number, URL: iss.URL}
 		if !dry {
 			msg := fmt.Sprintf("Alle Funde dieses Issues sind laut Fleet-Analyse `%s` behoben.%s", rep.RunID, reportLink(cfg))
+			if viaKnown {
+				msg = fmt.Sprintf("Alle Funde dieses Issues sind laut Fleet-Analyse `%s` behoben oder in der Datei known-findings als bekannt akzeptiert.%s", rep.RunID, reportLink(cfg))
+			}
 			if err := s.Client.Comment(ctx, iss.Number, msg); err != nil {
 				return acts, err
 			}

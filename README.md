@@ -151,6 +151,7 @@ k8s-cluster-report (read-only user)
 | `ANALYSIS_SOURCES` | `k8sgpt,endpoints,vm` | sources, archive prefix `system=<name>-<target>/`; `name=prefix` sets another prefix |
 | `ANALYSIS_LABS` | — | groups the report by lab (#26): `LabUL=platform-sthings,*-labul;LabDA=sthings-app*,labda-*`, target name globs, first match wins; per-lab table, lab column, labs per topic, per-lab line in the pitch. Empty: no grouping |
 | `ANALYSIS_STALE_AFTER` | `vm=26h` | per-source override of `STALE_AFTER` (#28): VM health reports come daily. Empty: `STALE_AFTER` for all |
+| `ANALYSIS_KNOWN_FINDINGS` | — | path of a known-findings file (stuttgart-things#4831): findings the team accepted, with `reason`, `owner`, `expires` (YYYY-MM-DD) and either a `fingerprint` or a `match` (globs on `source`, `target`, `kind`, `namespace`, `name`, `text`). Matching findings are marked `known`: never new, not counted as open, no topic, no GitHub issue, and they keep no issue open. The report lists them, expired acceptances (their findings count as open again) and entries that matched nothing. Validated strictly at start: unknown fields or a missing field fail the run. Empty: none |
 | `LOOKBACK_DAYS` | `7` | days of snapshots per system |
 | `ANALYSIS_INVENTORY_PREFIX` / `INVENTORY_STALE_AFTER` | `inventory-` / `36h` | the clusters' inventory (k8s-pitcher#108) as context, #21 |
 | `ISSUES_MODE` | `off` | `off`, `dry-run` (report says what it would file), `on` — GitHub issues from the analysis, #22 |

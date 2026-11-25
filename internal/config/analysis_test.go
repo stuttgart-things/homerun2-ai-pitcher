@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +50,24 @@ func TestClusterAnalysisConfig(t *testing.T) {
 		t.Errorf("invalid ANALYSIS_LABS accepted: %v", err)
 	}
 	t.Setenv("ANALYSIS_LABS", "")
+	if c.Analysis.Known != nil {
+		t.Error("known findings without ANALYSIS_KNOWN_FINDINGS")
+	}
+	dir := t.TempDir()
+	good, bad := filepath.Join(dir, "good.yaml"), filepath.Join(dir, "bad.yaml")
+	_ = os.WriteFile(good, []byte("entries:\n  - {id: x, fingerprint: a, reason: r, owner: o, expires: 2027-01-01}\n"), 0o600)
+	_ = os.WriteFile(bad, []byte("entries:\n  - {id: x, fingerprint: a, owner: o, expires: 2027-01-01}\n"), 0o600)
+	t.Setenv("ANALYSIS_KNOWN_FINDINGS", good)
+	if c, err = Load(); err != nil || c.Analysis.Known == nil || len(c.Analysis.Known.Entries) != 1 {
+		t.Errorf("ANALYSIS_KNOWN_FINDINGS: %v", err)
+	}
+	for _, p := range []string{bad, filepath.Join(dir, "missing.yaml")} {
+		t.Setenv("ANALYSIS_KNOWN_FINDINGS", p)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ANALYSIS_KNOWN_FINDINGS") {
+			t.Errorf("%s accepted: %v", p, err)
+		}
+	}
+	t.Setenv("ANALYSIS_KNOWN_FINDINGS", "")
 	t.Setenv("LOOKBACK_DAYS", "0")
 	if _, err := Load(); err == nil {
 		t.Error("LOOKBACK_DAYS=0 accepted")

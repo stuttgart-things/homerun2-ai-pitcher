@@ -31,6 +31,15 @@ type Config struct {
 	Language string // of summary, assessments and proposals
 	DryRun   bool   // build and print, store nothing
 	Attempts int    // model attempts
+	// Issues files GitHub issues for the topics (#22); nil: none.
+	Issues IssueSyncer
+}
+
+// IssueSyncer creates or updates tracking issues from a report. It runs
+// after the assessment, before the report is stored; its error is
+// recorded in the report, not fatal.
+type IssueSyncer interface {
+	Sync(ctx context.Context, rep *Report, in Input) ([]IssueAction, error)
 }
 
 // Result of one run.
@@ -78,6 +87,14 @@ func Run(ctx context.Context, archiveR Reader, reports ReportStore, ai AI, now t
 	}
 	if aerr != nil {
 		rep.AssessmentError = aerr.Error()
+	}
+	if cfg.Issues != nil {
+		acts, err := cfg.Issues.Sync(ctx, rep, in)
+		rep.Issues = acts
+		if err != nil {
+			slog.Warn("issue sync failed", "error", err)
+			rep.IssuesError = err.Error()
+		}
 	}
 
 	day := now.UTC().Format("2006-01-02")
@@ -136,15 +153,18 @@ func SystemPrompt(language string) string {
 	return `You assess the open findings of a fleet for the platform team, once a day.
 Sources: "k8sgpt" (K8sGPT analyzers per Kubernetes cluster), "endpoints" (HTTP heartbeat and TLS certificate probes per cluster), "vm" (health report per virtual machine: updates, disks, systemd units, journal errors, time sync, certificates).
 The input is a JSON condensation of the latest snapshot per source and target ("cluster" is the cluster or the host): each finding with a fingerprint (fp), source, kind, name, parent, severity, the error texts, the first day seen in the window, the days present, whether it recurred, and whether it is new since the previous report; plus the findings resolved since then and errors seen on several targets of one source.
+"versions" (if present) is context from each cluster's inventory, not findings: Kubernetes and kubelet versions, images without a pinned tag, the same image or chart in different versions across clusters, releases that are not ready. Use it to explain findings or to name version risks in the summary or in a topic; a topic on versions alone needs no fingerprints from it -- name a related finding's fingerprint if there is one, otherwise leave it out of the topics and mention it in the summary.
 
 Rules:
 - Group findings into topics: one underlying problem, possibly on several targets or sources (a certificate about to expire may show up as an endpoint and a VM finding). Prefer cross-target and recurring problems, findings with severity error or critical, and new ones; skip noise that needs no attention.
+- A finding with "known" set is accepted by the team (the reason is in "knownReason", from a file in git): it is not a problem to report. Never make it a topic, never name its fingerprint, do not propose fixes for it; "open" counts exclude it. You may mention in the summary how many findings are accepted as known. "knownFindings.expired" are acceptances that ran out: their findings are open again, say so if they matter.
 - Call a finding new only if its "new" flag is true. Without a previous report (previousReport empty) nothing is new: do not write "new since the last report" then.
 - Name only fingerprints and targets from the input. Never invent findings, objects, clusters or hosts.
 - assessment: what the problem most likely is and why it matters, grounded in the error texts. Say when the evidence is thin.
 - proposal: a concrete next step a human can take (a command to check, a likely fix, a filter for known noise). You do not act; nothing you write is executed.
 - confidence: how sure you are about the assessment. action: "issue" for something to track, "pr-proposal" when a config change in git is the obvious fix, "none" otherwise.
-- summary: 3 to 6 sentences for the team: the state of the fleet per area (Kubernetes, endpoints, VMs) that has data, what is new, what matters most.
+- summary: 3 to 6 sentences for the team: the state of the fleet per area (Kubernetes, endpoints, VMs) that has data, what is new, what matters most. If "labs" is present, every target carries its "lab": say which lab a problem is in, and give the state per lab.
+- Topic titles: if "labs" is present and a topic concerns one lab only, start the title with that lab ("LabDA: ...").
 - Do not rate the report's severity; it is computed from the numbers.
 - Write summary, titles, assessments and proposals in ` + language + `.`
 }

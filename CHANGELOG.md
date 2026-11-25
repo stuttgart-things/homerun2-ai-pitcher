@@ -1,3 +1,52 @@
+# [0.11.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.10.1...v0.11.0) (2026-11-23)
+
+
+### Features
+
+* **cluster-analysis:** known-findings file (ANALYSIS_KNOWN_FINDINGS) ([#30](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/30)) ([7d8bdb1](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/7d8bdb16166f685144d3c03dc0c4d4955910b1db)), closes [stuttgart-things/stuttgart-things#4831](https://github.com/stuttgart-things/stuttgart-things/issues/4831)
+
+## [0.10.1](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.10.0...v0.10.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **cluster-analysis:** stale threshold per source (ANALYSIS_STALE_AFTER, default vm=26h) ([#29](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/29)) ([21bb482](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/21bb482b53bd3bf315339bd1ba5ac1f7149688b8)), closes [#28](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/28)
+
+# [0.10.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.9.0...v0.10.0) (2026-11-15)
+
+
+### Features
+
+* **cluster-analysis:** group the fleet report by lab (ANALYSIS_LABS) ([#27](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/27)) ([5cbf786](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/5cbf78625889378c46a841fd50c53bd0d4cdc68e)), closes [#26](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/26)
+
+# [0.9.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.8.0...v0.9.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** the pitch links the GitHub issues ([#25](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/25)) ([6cc4b79](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/6cc4b7997dca82e2e2a12e1e4be0f03445843a03)), closes [#22](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/22)
+
+# [0.8.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.7.0...v0.8.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** GitHub issues from the fleet analysis ([#24](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/24)) ([2be1678](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/2be16785e4c74b32ae8d2cef21a48859be5be489)), closes [#22](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/22)
+
+# [0.7.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.6.0...v0.7.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** inventory as context — versions, images, drift ([#23](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/23)) ([c50ba32](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/c50ba326a79ec3b6d323c0cf8cad2b1abfa79caf)), closes [homerun2-k8s-pitcher#108](https://github.com/homerun2-k8s-pitcher/issues/108) [#21](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/21)
+
+# [0.6.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.5.0...v0.6.0) (2026-11-14)
+
+
+### Features
+
+* **cluster-analysis:** fleet analysis over all sources with findings/v1 ([#19](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/19)) ([a1401fd](https://github.com/stuttgart-things/homerun2-ai-pitcher/commit/a1401fd16a26b92f6bfbd81cc0b46ce3a901a14e)), closes [stuttgart-things/stuttgart-things#4556](https://github.com/stuttgart-things/stuttgart-things/issues/4556) [#18](https://github.com/stuttgart-things/homerun2-ai-pitcher/issues/18)
+
 # [0.5.0](https://github.com/stuttgart-things/homerun2-ai-pitcher/compare/v0.4.1...v0.5.0) (2026-11-13)
 
 

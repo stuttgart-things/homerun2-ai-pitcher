@@ -101,6 +101,22 @@ tagged `snapshot` whose payload is
 with the open findings only. A new source needs no code: add it to
 `ANALYSIS_SOURCES`.
 
+**Versions as context (#21).** The latest `inventory-<cluster>` snapshot
+(`inventory/v1`) of each cluster is condensed in code into facts:
+- Kubernetes and kubelet versions, and kubelets on another minor or on several versions
+- images with `:latest` or no tag
+- the same image repository, chart or Crossplane package in different versions on two clusters or more
+- HelmReleases, Applications and packages that are not ready
+
+Claude gets them as `versions` context; they are not findings (no new or
+resolved, no severity). The report renders them as the section **Versionen**.
+
+**GitHub issues (#22, `ISSUES_MODE`).** After the assessment, in code:
+- **Candidates:** a topic with `action` issue or pr-proposal and confidence medium or high, a topic holding a **new** finding of severity error or critical (whatever the model said), and every such finding no topic covers. One issue per topic, labels `fleet-analysis`, `severity/<worst>`, `area/<kubernetes|endpoints|vm>`, plus `fleet-analysis/pr-proposal`.
+- **Dedupe:** the body carries `<!-- fleet-fp: … -->` and `<!-- fleet-sys: … -->`. An open `fleet-analysis` issue with an overlapping fingerprint is never filed twice; it gets a "Besteht weiter" comment at most every `ISSUES_COMMENT_EVERY`, or at once when new findings join, and its markers grow.
+- **Resolved:** all fingerprints gone while every system of the issue still reports → a comment and the label `fleet-analysis/resolved` (closed with `ISSUES_CLOSE_RESOLVED`). If it comes back: "Wieder aufgetreten", label removed.
+- **Visibility:** the report lists every action under **GitHub-Issues**. `DRY_RUN` forces the issues into dry-run.
+
 ```
 k8s-cluster-report (read-only user)
   └ per cluster: the latest snapshot + one per day of LOOKBACK_DAYS
@@ -133,7 +149,14 @@ k8s-cluster-report (read-only user)
 | `ARCHIVE_BUCKET`, `ARCHIVE_ACCESS_KEY`, `ARCHIVE_SECRET_KEY` | `k8s-cluster-report`, **required** | read-only user |
 | `REPORT_BUCKET`, `REPORT_ACCESS_KEY`, `REPORT_SECRET_KEY` | `k8s-cluster-analysis`, **required** | writer of the reports |
 | `ANALYSIS_SOURCES` | `k8sgpt,endpoints,vm` | sources, archive prefix `system=<name>-<target>/`; `name=prefix` sets another prefix |
+| `ANALYSIS_LABS` | — | groups the report by lab (#26): `LabUL=platform-sthings,*-labul;LabDA=sthings-app*,labda-*`, target name globs, first match wins; per-lab table, lab column, labs per topic, per-lab line in the pitch. Empty: no grouping |
+| `ANALYSIS_STALE_AFTER` | `vm=26h` | per-source override of `STALE_AFTER` (#28): VM health reports come daily. Empty: `STALE_AFTER` for all |
+| `ANALYSIS_KNOWN_FINDINGS` | — | path of a known-findings file (stuttgart-things#4831): findings the team accepted, with `reason`, `owner`, `expires` (YYYY-MM-DD) and either a `fingerprint` or a `match` (globs on `source`, `target`, `kind`, `namespace`, `name`, `text`). Matching findings are marked `known`: never new, not counted as open, no topic, no GitHub issue, and they keep no issue open. The report lists them, expired acceptances (their findings count as open again) and entries that matched nothing. Validated strictly at start: unknown fields or a missing field fail the run. Empty: none |
 | `LOOKBACK_DAYS` | `7` | days of snapshots per system |
+| `ANALYSIS_INVENTORY_PREFIX` / `INVENTORY_STALE_AFTER` | `inventory-` / `36h` | the clusters' inventory (k8s-pitcher#108) as context, #21 |
+| `ISSUES_MODE` | `off` | `off`, `dry-run` (report says what it would file), `on` — GitHub issues from the analysis, #22 |
+| `ISSUES_REPO` / `GITHUB_TOKEN` | `stuttgart-things/stuttgart-things` / — | fine-grained token, issues read/write; required for `on` |
+| `ISSUES_MAX_PER_RUN` / `ISSUES_COMMENT_EVERY` / `ISSUES_CLOSE_RESOLVED` | `5` / `168h` / `false` | new issues per run, one "still open" comment per issue per window, close once resolved |
 | `STALE_AFTER` | `3h` | snapshots come hourly |
 | `MAX_FINDINGS_PER_CLUSTER` | `50` | passed on per system (new and recurring first) |
 | `REPORT_URL` | — | link in the pitch, e.g. the portal's `/archive/?tab=analyses` |

@@ -45,17 +45,25 @@ type Finding struct {
 	Recurring bool `json:"recurring,omitempty"`
 	// New since the previous report.
 	New bool `json:"new,omitempty"`
+	// Known is the id of the known-findings entry that accepts the finding
+	// (stuttgart-things#4831), KnownReason its reason. A known finding is
+	// never new, not counted as open and files no issue.
+	Known       string `json:"known,omitempty"`
+	KnownReason string `json:"knownReason,omitempty"`
 }
 
 // ClusterState is the latest snapshot of one target of one source.
 type ClusterState struct {
 	Source     string    `json:"source"`
 	Cluster    string    `json:"cluster"`
+	Lab        string    `json:"lab,omitempty"` // ANALYSIS_LABS, #26
 	SnapshotAt time.Time `json:"snapshotAt"`
 	Stale      bool      `json:"stale,omitempty"`
-	Open       int       `json:"open"`
-	Findings   []Finding `json:"findings"`
-	Omitted    int       `json:"omitted,omitempty"`
+	// Open counts the findings of the snapshot not accepted as known.
+	Open     int       `json:"open"`
+	Known    int       `json:"known,omitempty"`
+	Findings []Finding `json:"findings"`
+	Omitted  int       `json:"omitted,omitempty"`
 }
 
 // CrossCluster is the same error on several targets of one source.
@@ -68,12 +76,19 @@ type CrossCluster struct {
 
 // Input is what the model gets, and what the report's numbers come from.
 type Input struct {
-	GeneratedAt    time.Time      `json:"generatedAt"`
-	LookbackDays   int            `json:"lookbackDays"`
+	GeneratedAt  time.Time `json:"generatedAt"`
+	LookbackDays int       `json:"lookbackDays"`
+	// Labs are the configured labs in order (#26); every target carries its
+	// lab, "" when no pattern matched.
+	Labs           []string       `json:"labs,omitempty"`
 	Clusters       []ClusterState `json:"clusters"`
 	Resolved       []Ref          `json:"resolvedSinceLastReport"`
 	CrossCluster   []CrossCluster `json:"crossCluster,omitempty"`
 	PreviousReport string         `json:"previousReport,omitempty"` // its summary
+	// Versions is the clusters' inventory as context (#21), nil without one.
+	Versions *Versions `json:"versions,omitempty"`
+	// Known is what the known-findings file did (#4831), nil without one.
+	Known *KnownState `json:"knownFindings,omitempty"`
 }
 
 // Ref names a finding without its details.
@@ -122,11 +137,49 @@ func ParseSources(s string) ([]Source, error) {
 type Options struct {
 	Sources             []Source      // DefaultSources when empty
 	LookbackDays        int           // days of snapshots read per cluster
+	InventoryPrefix     string        // system=<InventoryPrefix><cluster>/ of the inventory (#21); empty: none
+	InventoryStaleAfter time.Duration // the inventory comes daily
 	StaleAfter          time.Duration // a newer snapshot is expected every hour
-	MaxFindingsPerClu   int           // findings passed on per target
-	MaxGetsPerDay       int           // objects read per target and day to find its last snapshot
+	// StaleAfterBySource overrides StaleAfter per source (#28): the VM
+	// health reports come once a day.
+	StaleAfterBySource  map[string]time.Duration
+	MaxFindingsPerClu   int // findings passed on per target
+	MaxGetsPerDay       int // objects read per target and day to find its last snapshot
 	MaxErrorChars       int
 	MaxErrorsPerFinding int
+	Labs                Labs // groups the targets by lab (#26); empty: no grouping
+	// Known marks accepted findings (stuttgart-things#4831); nil: none.
+	Known *KnownFindings
+}
+
+// staleAfter is the threshold of a source: its override, else StaleAfter.
+func (o Options) staleAfter(source string) time.Duration {
+	if d, ok := o.StaleAfterBySource[source]; ok {
+		return d
+	}
+	return o.StaleAfter
+}
+
+// ParseStaleAfter reads "vm=26h,endpoints=1h".
+func ParseStaleAfter(s string) (map[string]time.Duration, error) {
+	out := map[string]time.Duration{}
+	for _, e := range strings.Split(s, ",") {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		name, v, ok := strings.Cut(e, "=")
+		name = strings.TrimSpace(name)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("%q: want <source>=<duration>", e)
+		}
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("%q: want a positive duration", e)
+		}
+		out[name] = d
+	}
+	return out, nil
 }
 
 // snapshot is the archived message of a snapshot collector.
@@ -282,6 +335,9 @@ func refSource(r Ref) string {
 // previous report's open findings.
 func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Options) (Input, error) {
 	in := Input{GeneratedAt: now.UTC(), LookbackDays: o.LookbackDays}
+	for _, l := range o.Labs {
+		in.Labs = append(in.Labs, l.Name)
+	}
 	sources := o.Sources
 	if len(sources) == 0 {
 		sources = DefaultSources
@@ -305,6 +361,7 @@ func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Opt
 	}
 
 	open := map[string]bool{}
+	tracker := newKnownTracker(o.Known)
 	for _, t := range targets {
 		c := t.Name
 		perDay := map[string]map[string]bool{} // day -> fingerprints
@@ -332,7 +389,7 @@ func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Opt
 			slog.Warn("no snapshot in the window", "source", t.Source.Name, "target", c, "days", o.LookbackDays)
 			continue
 		}
-		st := ClusterState{Source: t.Source.Name, Cluster: c, SnapshotAt: latest.At, Stale: now.Sub(latest.At) > o.StaleAfter, Open: len(latest.Items)}
+		st := ClusterState{Source: t.Source.Name, Cluster: c, Lab: o.Labs.Of(c), SnapshotAt: latest.At, Stale: now.Sub(latest.At) > o.staleAfter(t.Source.Name)}
 		for _, it := range latest.Items {
 			f := Finding{
 				Fingerprint: it.Fingerprint, Source: t.Source.Name, Cluster: c,
@@ -360,11 +417,23 @@ func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Opt
 			}
 			_, wasOpen := prevOpen[f.Fingerprint]
 			f.New = previous != nil && !wasOpen
+			if e := o.Known.Lookup(f, it.Texts, now); e != nil {
+				f.Known, f.KnownReason, f.New = e.ID, e.Reason, false
+				tracker.hit(e, t.Source.Name+"/"+c)
+				st.Known++
+			} else {
+				st.Open++
+			}
+			// Known findings stay in the baseline: accepting one does not
+			// make it "resolved".
 			open[f.Fingerprint] = true
 			st.Findings = append(st.Findings, f)
 		}
 		sort.Slice(st.Findings, func(a, b int) bool {
 			fa, fb := st.Findings[a], st.Findings[b]
+			if (fa.Known == "") != (fb.Known == "") {
+				return fa.Known == "" // known last: cut first by MaxFindingsPerClu
+			}
 			if fa.New != fb.New {
 				return fa.New
 			}
@@ -390,6 +459,10 @@ func Build(ctx context.Context, r Reader, now time.Time, previous *Report, o Opt
 		return ra.Source+ra.Cluster+ra.Name < rb.Source+rb.Cluster+rb.Name
 	})
 	in.CrossCluster = crossCluster(in.Clusters)
+	in.Known = tracker.state(now)
+	if in.Versions, err = BuildVersions(ctx, r, now, days, o); err != nil {
+		return in, err
+	}
 	return in, nil
 }
 
@@ -400,7 +473,7 @@ func crossCluster(states []ClusterState) []CrossCluster {
 	kinds := map[string]CrossCluster{}
 	for _, st := range states {
 		for _, f := range st.Findings {
-			if len(f.Errors) == 0 {
+			if len(f.Errors) == 0 || f.Known != "" {
 				continue
 			}
 			k := st.Source + "\x00" + f.Kind + "\x00" + f.Errors[0]

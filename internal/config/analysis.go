@@ -19,26 +19,41 @@ const ClusterAnalysisMode = "cluster-analysis"
 type Analysis struct {
 	// S3 (homerun2-s3-catcher's MinIO): one endpoint, two buckets, each with
 	// its own user -- read-only on the archive, writer on the reports.
-	Endpoint       string
-	Region         string
-	UseSSL         bool
-	Insecure       bool
-	ArchiveBucket  string
-	ArchiveKey     string
-	ArchiveSecret  string
-	ReportBucket   string
-	ReportKey      string
-	ReportSecret   string
-	Sources        []clusteranalysis.Source
-	LookbackDays   int
-	StaleAfter     time.Duration
-	MaxPerCluster  int
-	ReportURL      string // link in the pitch, e.g. the portal's /archive/?tab=analyses
-	ClaudeBin      string
-	ClaudeModel    string
-	ClaudeBudget   float64
-	ClaudeTimeout  time.Duration
-	ClaudeAttempts int
+	Endpoint        string
+	Region          string
+	UseSSL          bool
+	Insecure        bool
+	ArchiveBucket   string
+	ArchiveKey      string
+	ArchiveSecret   string
+	ReportBucket    string
+	ReportKey       string
+	ReportSecret    string
+	Sources         []clusteranalysis.Source
+	Labs            clusteranalysis.Labs
+	InventoryPrefix string
+	// Known-findings file (stuttgart-things#4831): ANALYSIS_KNOWN_FINDINGS,
+	// read and validated at start; empty path: none.
+	KnownFile string
+	Known     *clusteranalysis.KnownFindings
+	// GitHub issues from the analysis (#22).
+	IssuesMode          string
+	IssuesRepo          string
+	IssuesToken         string
+	IssuesMaxPerRun     int
+	IssuesCommentEvery  time.Duration
+	IssuesCloseResolved bool
+	InventoryStaleAfter time.Duration
+	LookbackDays        int
+	StaleAfter          time.Duration
+	StaleAfterBySource  map[string]time.Duration
+	MaxPerCluster       int
+	ReportURL           string // link in the pitch, e.g. the portal's /archive/?tab=analyses
+	ClaudeBin           string
+	ClaudeModel         string
+	ClaudeBudget        float64
+	ClaudeTimeout       time.Duration
+	ClaudeAttempts      int
 }
 
 func loadAnalysis(c *Config) error {
@@ -57,6 +72,22 @@ func loadAnalysis(c *Config) error {
 	if a.Sources, err = clusteranalysis.ParseSources(getEnv("ANALYSIS_SOURCES", "k8sgpt,endpoints,vm")); err != nil {
 		return fmt.Errorf("invalid ANALYSIS_SOURCES: %w", err)
 	}
+	if a.Labs, err = clusteranalysis.ParseLabs(getEnv("ANALYSIS_LABS", "")); err != nil {
+		return fmt.Errorf("invalid ANALYSIS_LABS: %w", err)
+	}
+	if a.StaleAfterBySource, err = clusteranalysis.ParseStaleAfter(getEnv("ANALYSIS_STALE_AFTER", "vm=26h")); err != nil {
+		return fmt.Errorf("invalid ANALYSIS_STALE_AFTER: %w", err)
+	}
+	a.InventoryPrefix = getEnv("ANALYSIS_INVENTORY_PREFIX", "inventory-")
+	if a.KnownFile = getEnv("ANALYSIS_KNOWN_FINDINGS", ""); a.KnownFile != "" {
+		if a.Known, err = clusteranalysis.LoadKnownFile(a.KnownFile); err != nil {
+			return fmt.Errorf("invalid ANALYSIS_KNOWN_FINDINGS: %w", err)
+		}
+	}
+	a.IssuesMode = getEnv("ISSUES_MODE", "off")
+	a.IssuesRepo = getEnv("ISSUES_REPO", "stuttgart-things/stuttgart-things")
+	a.IssuesToken = getEnv("GITHUB_TOKEN", "")
+	a.IssuesCloseResolved = getEnv("ISSUES_CLOSE_RESOLVED", "false") == "true"
 	a.ReportURL = getEnv("REPORT_URL", "")
 	a.ClaudeBin = getEnv("CLAUDE_BIN", "claude")
 	a.ClaudeModel = getEnv("CLAUDE_MODEL", "sonnet")
@@ -69,6 +100,7 @@ func loadAnalysis(c *Config) error {
 		{"LOOKBACK_DAYS", 7, 1, &a.LookbackDays},
 		{"MAX_FINDINGS_PER_CLUSTER", 50, 1, &a.MaxPerCluster},
 		{"CLAUDE_ATTEMPTS", 2, 1, &a.ClaudeAttempts},
+		{"ISSUES_MAX_PER_RUN", 5, 1, &a.IssuesMaxPerRun},
 	} {
 		if *i.dst, err = strconv.Atoi(getEnv(i.env, strconv.Itoa(i.def))); err != nil || *i.dst < i.min {
 			return fmt.Errorf("invalid %s (want an integer >= %d)", i.env, i.min)
@@ -79,6 +111,8 @@ func loadAnalysis(c *Config) error {
 		dst      *time.Duration
 	}{
 		{"STALE_AFTER", "3h", &a.StaleAfter},
+		{"INVENTORY_STALE_AFTER", "36h", &a.InventoryStaleAfter},
+		{"ISSUES_COMMENT_EVERY", "168h", &a.IssuesCommentEvery},
 		{"CLAUDE_TIMEOUT", "10m", &a.ClaudeTimeout},
 	} {
 		if *d.dst, err = time.ParseDuration(getEnv(d.env, d.def)); err != nil || *d.dst <= 0 {
@@ -97,6 +131,15 @@ func loadAnalysis(c *Config) error {
 		if v == "" {
 			missing = append(missing, env)
 		}
+	}
+	switch a.IssuesMode {
+	case "off", "dry-run":
+	case "on":
+		if a.IssuesToken == "" && !c.DryRun {
+			missing = append(missing, "GITHUB_TOKEN")
+		}
+	default:
+		return fmt.Errorf("invalid ISSUES_MODE %q (off, dry-run, on)", a.IssuesMode)
 	}
 	if !c.DryRun {
 		if c.PitcherURL == "" {

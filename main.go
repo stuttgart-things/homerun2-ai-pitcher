@@ -20,6 +20,7 @@ import (
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/claudecode"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/clusteranalysis"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/config"
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/fleetissues"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/llm"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/pitch"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/sources"
@@ -128,19 +129,25 @@ func runClusterAnalysis(cfg *config.Config) int {
 	reportB := open(a.ReportBucket, a.ReportKey, a.ReportSecret)
 	ai := &claudecode.Runner{Bin: a.ClaudeBin, Model: a.ClaudeModel, MaxBudget: a.ClaudeBudget, Timeout: a.ClaudeTimeout}
 
+	if a.Known != nil {
+		slog.Info("known findings loaded", "file", a.KnownFile, "entries", len(a.Known.Entries))
+	}
 	res, err := clusteranalysis.Run(ctx, archiveB, reportB, ai, time.Now(), clusteranalysis.Config{
 		Options: clusteranalysis.Options{
-			Sources: a.Sources, LookbackDays: a.LookbackDays, StaleAfter: a.StaleAfter,
+			Sources: a.Sources, LookbackDays: a.LookbackDays, StaleAfter: a.StaleAfter, StaleAfterBySource: a.StaleAfterBySource,
+			InventoryPrefix: a.InventoryPrefix, InventoryStaleAfter: a.InventoryStaleAfter,
 			MaxFindingsPerClu: a.MaxPerCluster, MaxGetsPerDay: 50, MaxErrorChars: 400, MaxErrorsPerFinding: 3,
+			Labs: a.Labs, Known: a.Known,
 		},
 		Language: cfg.Language, DryRun: cfg.DryRun, Attempts: a.ClaudeAttempts,
+		Issues: issueSyncer(cfg),
 	})
 	if err != nil {
 		slog.Error("cluster analysis failed", "error", err)
 		return 1
 	}
 	r := res.Report
-	slog.Info("cluster analysis", "clusters", r.Stats.Clusters, "open", r.Stats.Open, "new", r.Stats.New,
+	slog.Info("cluster analysis", "clusters", r.Stats.Clusters, "open", r.Stats.Open, "known", r.Stats.Known, "new", r.Stats.New,
 		"resolved", r.Stats.Resolved, "topics", len(r.Topics), "model", r.Model, "costUsd", r.CostUSD,
 		"assessmentError", r.AssessmentError, "report", res.JSONKey)
 
@@ -171,11 +178,60 @@ func clusterAnalysisMessage(cfg *config.Config, r *clusteranalysis.Report) pitch
 	if r.AssessmentError != "" {
 		b.WriteString("[AI n/a] numbers only\n")
 	}
+	// Per lab (#26): the analysis spans the labs, the card says where.
+	if len(r.Labs) > 0 {
+		var parts []string
+		for _, l := range r.Labs {
+			name := l.Lab
+			if name == "" {
+				name = "no lab"
+			}
+			parts = append(parts, fmt.Sprintf("%s: %d open, %d new on %d", name, l.Open, l.New, l.Systems))
+		}
+		b.WriteString(strings.Join(parts, " · ") + "\n")
+	}
+	issueOf := map[string]clusteranalysis.IssueAction{} // topic title -> its issue
+	for _, a := range r.Issues {
+		if a.URL != "" {
+			issueOf[a.Title] = a
+		}
+	}
 	for i, t := range r.Topics {
 		fmt.Fprintf(&b, "\n%d. %s (%s)", i+1, t.Title, strings.Join(t.Clusters, ", "))
+		if a, ok := issueOf[t.Title]; ok {
+			fmt.Fprintf(&b, " → #%d", a.Number)
+		}
+	}
+	// The issues this run filed or updated (#22), with their links: the card
+	// is where people read the analysis.
+	var lines, numbers []string
+	for _, a := range r.Issues {
+		if a.URL == "" || a.Action == "skipped" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- #%d %s (%s): %s", a.Number, a.Title, issueVerb(a.Action), a.URL))
+		numbers = append(numbers, fmt.Sprint(a.Number))
+	}
+	if len(lines) > 0 {
+		fmt.Fprintf(&b, "\n\nGitHub issues:\n%s", strings.Join(lines, "\n"))
 	}
 	if len(r.Stats.Stale) > 0 {
 		fmt.Fprintf(&b, "\n\nNo current snapshot: %s", strings.Join(r.Stats.Stale, ", "))
+	}
+	// Known findings (#4831): accepted in git, not counted as open.
+	if r.Stats.Known > 0 {
+		fmt.Fprintf(&b, "\n\nAccepted as known (not counted): %d", r.Stats.Known)
+	}
+	if r.Known != nil && len(r.Known.Expired) > 0 {
+		var ids []string
+		for _, e := range r.Known.Expired {
+			ids = append(ids, e.ID)
+		}
+		fmt.Fprintf(&b, "\n\nKnown-findings acceptance expired: %s", strings.Join(ids, ", "))
+	}
+	tags := "ai,cluster-analysis,report=" + r.RunID
+	if len(numbers) > 0 {
+		tags += ",issues=" + strings.Join(numbers, "+")
 	}
 	return pitch.Message{
 		Title:    r.Title(),
@@ -183,7 +239,7 @@ func clusterAnalysisMessage(cfg *config.Config, r *clusteranalysis.Report) pitch
 		Severity: r.Severity,
 		Author:   cfg.Author,
 		System:   cfg.System,
-		Tags:     "ai,cluster-analysis,report=" + r.RunID,
+		Tags:     tags,
 		URL:      cfg.Analysis.ReportURL,
 	}
 }
@@ -379,4 +435,40 @@ func logLevel() slog.Level {
 		return slog.LevelError
 	}
 	return slog.LevelInfo
+}
+
+// issueSyncer files GitHub issues from the analysis (#22); a dry run of the
+// whole analysis only says what it would file.
+func issueSyncer(cfg *config.Config) clusteranalysis.IssueSyncer {
+	a := cfg.Analysis
+	mode := a.IssuesMode
+	if mode == fleetissues.ModeOff {
+		return nil
+	}
+	if cfg.DryRun {
+		mode = fleetissues.ModeDryRun
+	}
+	s := &fleetissues.Syncer{Cfg: fleetissues.Config{Mode: mode, MaxPerRun: a.IssuesMaxPerRun,
+		CommentEvery: a.IssuesCommentEvery, CloseResolved: a.IssuesCloseResolved, ReportURL: a.ReportURL}}
+	if a.IssuesToken != "" {
+		s.Client = &fleetissues.GitHub{Repo: a.IssuesRepo, Token: a.IssuesToken}
+	}
+	slog.Info("github issues", "mode", mode, "repo", a.IssuesRepo)
+	return s
+}
+
+// issueVerb names an issue action for the card.
+func issueVerb(action string) string {
+	switch action {
+	case "created":
+		return "neu"
+	case "commented":
+		return "besteht weiter"
+	case "reopened":
+		return "wieder aufgetreten"
+	case "resolved":
+		return "behoben"
+	default:
+		return action
+	}
 }

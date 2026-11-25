@@ -422,6 +422,15 @@ func TestRunBudget(t *testing.T) {
 	if got, want := runBudget(cfg), 702*time.Second; got != want {
 		t.Errorf("runBudget = %v, want %v", got, want)
 	}
+
+	// #11: the default deployment, five models one per request at 30s:
+	// per call 3*5*30s + 15s = 465s; two calls 930s; tickers 12s; +120s.
+	// Still inside the CronJob's activeDeadlineSeconds of 1200.
+	cfg.Model, cfg.TickerModel = "a,b,c,d,e", "a,b,c,d,e"
+	cfg.LLMTimeout, cfg.LLMModelsPerRequest = 30*time.Second, 1
+	if got, want := runBudget(cfg), 1062*time.Second; got != want {
+		t.Errorf("runBudget = %v, want %v", got, want)
+	}
 }
 
 // The analysis card links the issues the run filed or commented (#22).

@@ -82,8 +82,8 @@ _cronJob = lambda run: {str:} -> {str:} {
             failedJobsHistoryLimit = 3
             jobTemplate.spec = {
                 backoffLimit = 1
-                # Above the run's own budget with the defaults (~12 min: two model
-                # calls with 3 tries of 90 s each, back-off, ticker spacing).
+                # Above the run's own budget with the defaults (~18 min for five
+                # models: two calls, 3 tries, 30 s per model, back-off, tickers).
                 activeDeadlineSeconds = 2400 if _claude else 1200
                 template = {
                     metadata.labels = _labels

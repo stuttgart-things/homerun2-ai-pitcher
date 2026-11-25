@@ -253,7 +253,9 @@ displayRules:
 | `OPENROUTER_API_KEY` | (empty = fallback) | OpenRouter API key |
 | `OPENROUTER_MODEL` | `openrouter/free` | an OpenRouter model id, or a **comma-separated list** tried in order: OpenRouter's `models` fallback takes at most 3, so a longer list is sent in groups of 3, one after the other, e.g. `google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,openrouter/free`. `openrouter/free` alone may route to very small models (2.6B) that misread findings |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible endpoint |
-| `LLM_TIMEOUT` | `90s` | timeout of the model call |
+| `LLM_TIMEOUT` | `30s` | timeout of **one request**, i.e. one model with the default `LLM_MODELS_PER_REQUEST=1`. Cut to a fair share of the run's remaining time, so the later models of the list still get their turn before the deadline. A free model that hangs costs this much, not the whole run |
+| `LLM_MODELS_PER_REQUEST` | `1` | models of `OPENROUTER_MODEL` per request (1–3). With 2–3 OpenRouter falls back server-side inside the group, but one hanging model then uses the group's whole timeout |
+| `LLM_DIAL_NETWORK` | `tcp` | `tcp`: all addresses of the host, IPv4 first, then IPv6; `tcp4` / `tcp6`: one family only. When every address fails, the error lists each address with its own cause (Go's dialer only reports the first, which hid IPv4 failures behind an IPv6 "network is unreachable", #11) |
 | `LLM_MAX_TOKENS` | `4000` | token cap of the answer **including a reasoning model's thinking** (`reasoning.effort: low`, thinking excluded from the answer). An answer cut by the cap is trimmed to its last full sentence and marked |
 | `SUMMARY_LANGUAGE` | `German` | language of the AI text |
 | `OPENROUTER_MODEL_DENYLIST` | `safety,guard` | substrings of model ids whose answers are rejected (and retried): `openrouter/free` also routes to classifiers such as `nvidia/nemotron-3.5-content-safety`, which answers `User Safety: safe` |

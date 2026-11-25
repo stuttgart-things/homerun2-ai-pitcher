@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Client calls POST <BaseURL>/chat/completions.
@@ -28,7 +29,17 @@ type Client struct {
 	Deny []string
 	// MinChars: a shorter answer counts as a failure (0 = no minimum).
 	MinChars int
-	HTTP     *http.Client
+	// RequestTimeout caps one request (one model, or one group of
+	// ModelsPerRequest models). It is cut to a fair share of the context's
+	// remaining time, so the later models of the list still get their turn
+	// before the run's deadline (#11). 0 = 30s.
+	RequestTimeout time.Duration
+	// ModelsPerRequest: how many models of the list go into one request as
+	// OpenRouter's server-side fallback (1-3, 0 = 3). With 1, every model
+	// has its own RequestTimeout: a free model that hangs costs that much,
+	// not the whole budget of its group.
+	ModelsPerRequest int
+	HTTP             *http.Client
 }
 
 // Result is the answer plus the model that actually produced it. With the
@@ -40,6 +51,8 @@ type Result struct {
 	// Truncated: the model hit the token limit (finish_reason "length").
 	// Text is then cut back to its last complete sentence.
 	Truncated bool
+	// FinishReason as OpenRouter reported it (stop, length, ...).
+	FinishReason string
 }
 
 type chatMessage struct {
@@ -88,11 +101,20 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 		return nil, ErrNoAPIKey
 	}
 	// OpenRouter takes at most 3 models per request ("'models' array must
-	// have 3 items or fewer"); a longer list is tried in groups of 3.
+	// have 3 items or fewer"); a longer list is tried in groups.
+	gs := groups(splitModels(c.Model), c.modelsPerRequest())
 	var err error
-	for _, group := range groups(splitModels(c.Model), maxModelsPerRequest) {
+	for i, group := range gs {
+		if ctx.Err() != nil {
+			if err == nil {
+				err = ctx.Err()
+			}
+			return nil, fmt.Errorf("openrouter: run deadline reached before models %s: %w", strings.Join(group, ","), err)
+		}
+		timeout := c.share(ctx, len(gs)-i)
+		start := time.Now()
 		var res *Result
-		res, err = c.completeGroup(ctx, group, system, user)
+		res, err = c.completeGroup(ctx, timeout, group, system, user)
 		if err == nil {
 			return res, nil
 		}
@@ -100,9 +122,34 @@ func (c *Client) Complete(ctx context.Context, system, user string) (*Result, er
 		if errors.As(err, &he) && !he.Retryable() {
 			return nil, err // a bad request or key is bad for every group
 		}
-		slog.Warn("model group failed", "models", strings.Join(group, ","), "error", err)
+		slog.Warn("model group failed", "group", i+1, "of", len(gs), "models", strings.Join(group, ","),
+			"timeout", timeout, "elapsed", time.Since(start).Round(time.Millisecond), "error", err)
 	}
 	return nil, err
+}
+
+// share is the timeout of the next request: RequestTimeout, or less when
+// the context's remaining time split over the requests still to come is
+// shorter. Without that, one hanging free model used the whole budget and
+// the fallback list never got its turn (#11).
+func (c *Client) share(ctx context.Context, left int) time.Duration {
+	t := c.RequestTimeout
+	if t <= 0 {
+		t = 30 * time.Second
+	}
+	if dl, ok := ctx.Deadline(); ok && left > 0 {
+		if s := time.Until(dl) / time.Duration(left); s < t {
+			t = max(s, time.Second)
+		}
+	}
+	return t
+}
+
+func (c *Client) modelsPerRequest() int {
+	if c.ModelsPerRequest >= 1 && c.ModelsPerRequest <= maxModelsPerRequest {
+		return c.ModelsPerRequest
+	}
+	return maxModelsPerRequest
 }
 
 const maxModelsPerRequest = 3
@@ -133,7 +180,31 @@ func (e *HTTPError) Retryable() bool {
 	return e.Status == http.StatusTooManyRequests || e.Status == http.StatusRequestTimeout || e.Status >= 500
 }
 
-func (c *Client) completeGroup(ctx context.Context, models []string, system, user string) (*Result, error) {
+// completeGroup sends one request. Its errors name the models, and wrap
+// the cause (%w) so the network error, timeout or HTTP status stays
+// visible and testable.
+func (c *Client) completeGroup(ctx context.Context, timeout time.Duration, models []string, system, user string) (*Result, error) {
+	res, err := c.request(ctx, timeout, models, system, user)
+	if err != nil {
+		var he *HTTPError
+		if errors.As(err, &he) {
+			return nil, err // already "openrouter: HTTP n: ..."
+		}
+		return nil, fmt.Errorf("openrouter [%s]: %w", strings.Join(models, ","), err)
+	}
+	return res, nil
+}
+
+func (c *Client) request(parent context.Context, timeout time.Duration, models []string, system, user string) (*Result, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	// timedOut: this request's own timeout, not the caller's deadline.
+	timedOut := func(err error) error {
+		if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("no answer within %s: %w", timeout, err)
+		}
+		return err
+	}
 	req0 := chatRequest{
 		Model: models[0],
 		Messages: []chatMessage{
@@ -163,30 +234,32 @@ func (c *Client) completeGroup(ctx context.Context, models []string, system, use
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, timedOut(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, err
+		// OpenRouter answers 200 at once and keeps the body open while the
+		// model thinks: a slow model fails here, not before the headers.
+		return nil, timedOut(fmt.Errorf("reading the answer (HTTP %d): %w", resp.StatusCode, err))
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, &HTTPError{Status: resp.StatusCode, Text: errorText(raw)}
 	}
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
-		return nil, fmt.Errorf("openrouter: decode: %w", err)
+		return nil, fmt.Errorf("decode: %w", err)
 	}
 	if cr.Error != nil {
-		return nil, fmt.Errorf("openrouter: %s", cr.Error.Message)
+		return nil, errors.New(cr.Error.Message)
 	}
 	if len(cr.Choices) == 0 {
-		return nil, fmt.Errorf("openrouter: empty answer (model %s, no choices)", cr.Model)
+		return nil, fmt.Errorf("empty answer (model %s, no choices)", cr.Model)
 	}
 	if strings.TrimSpace(cr.Choices[0].Message.Content) == "" {
 		// Seen with free reasoning models: the thinking used the budget or
 		// the model returned nothing (finish_reason length / stop / error).
-		return nil, fmt.Errorf("openrouter: empty answer (model %s, finish_reason %q)", cr.Model, cr.Choices[0].FinishReason)
+		return nil, fmt.Errorf("empty answer (model %s, finish_reason %q)", cr.Model, cr.Choices[0].FinishReason)
 	}
 	model := cr.Model
 	if model == "" {
@@ -194,22 +267,22 @@ func (c *Client) completeGroup(ctx context.Context, models []string, system, use
 	}
 	if len(models) > 1 && model != models[0] {
 		// OpenRouter does not say why; a single-model run shows the error.
-		slog.Warn("first model not used, OpenRouter fell back", "wanted", models[0], "got", model)
+		slog.Warn("first model not used, OpenRouter fell back", "group", strings.Join(models, ","), "wanted", models[0], "got", model)
 	}
 	for _, d := range c.Deny {
 		if d != "" && strings.Contains(strings.ToLower(model), strings.ToLower(d)) {
-			return nil, fmt.Errorf("openrouter: answer from denied model %s (matches %q)", model, d)
+			return nil, fmt.Errorf("answer from denied model %s (matches %q)", model, d)
 		}
 	}
-	res := &Result{Text: strings.TrimSpace(cr.Choices[0].Message.Content), Model: model}
+	res := &Result{Text: strings.TrimSpace(cr.Choices[0].Message.Content), Model: model, FinishReason: cr.Choices[0].FinishReason}
 	if c.MinChars > 0 && len([]rune(res.Text)) < c.MinChars {
-		return nil, fmt.Errorf("openrouter: answer from %s too short (%d < %d chars): %q", model, len([]rune(res.Text)), c.MinChars, truncate(res.Text, 60))
+		return nil, fmt.Errorf("answer from %s too short (%d < %d chars): %q", model, len([]rune(res.Text)), c.MinChars, truncate(res.Text, 60))
 	}
 	if cr.Choices[0].FinishReason == "length" {
 		res.Truncated = true
 		res.Text = lastSentence(res.Text)
 		if res.Text == "" {
-			return nil, errors.New("openrouter: answer cut off by the token limit before a complete sentence")
+			return nil, errors.New("answer cut off by the token limit before a complete sentence")
 		}
 	}
 	return res, nil

@@ -13,6 +13,7 @@ _data = {
         "schedule-pitcher-token": config.schedulePitcherToken
         "pitcher-token": config.pitcherToken
         "openrouter-api-key": config.openrouterAPIKey
+        "redis-password": config.redisPassword
     } if v
 }
 

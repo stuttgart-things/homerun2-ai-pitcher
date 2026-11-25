@@ -122,7 +122,7 @@ func TestLoadModes(t *testing.T) {
 	}
 
 	t.Setenv("MODE", "nightly")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "evening, morning, week-ahead, weekly") {
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "evening, incident, morning, week-ahead, weekly") {
 		t.Errorf("unknown mode: err = %v", err)
 	}
 }
@@ -145,5 +145,31 @@ func TestLoadLLMTimeoutAndNetwork(t *testing.T) {
 				t.Errorf("%s=%s: want an error", env, bad)
 			}
 		})
+	}
+}
+
+func TestLoadIncident(t *testing.T) {
+	t.Setenv("MODE", "incident")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "REDIS_ADDR") {
+		t.Errorf("without redis: %v", err)
+	}
+	t.Setenv("REDIS_ADDR", "redis-stack.homerun2.svc.cluster.local")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PITCHER_URL") {
+		t.Errorf("without pitcher: %v", err)
+	}
+	t.Setenv("DRY_RUN", "true")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := c.Incident
+	if c.System != "ai-incident" || i.RedisAddr != "redis-stack.homerun2.svc.cluster.local:6379" ||
+		strings.Join(i.Streams, ",") != "alerts,messages" || strings.Join(i.ExcludeSystems, ",") != "ai-*,scout-digest" ||
+		i.Once || i.Cooldown.String() != "6h0m0s" || i.Window.String() != "15m0s" || i.Location.String() != "Europe/Berlin" {
+		t.Errorf("defaults = %+v system=%s", i, c.System)
+	}
+	t.Setenv("INCIDENT_RUN", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Error("want an error for INCIDENT_RUN=sometimes")
 	}
 }

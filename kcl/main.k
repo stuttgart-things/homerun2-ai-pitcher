@@ -6,5 +6,6 @@ the sibling services.
 
 import secret
 import cronjob
+import incident
 
-manifests = [m for m in [secret.secret] if m] + cronjob.cronJobs
+manifests = [m for m in [secret.secret] if m] + cronjob.cronJobs + incident.manifests

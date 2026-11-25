@@ -133,3 +133,14 @@ func norm(d string) string {
 	}
 	return t
 }
+
+// Factual reports whether every number in line occurs in input, or is a
+// count from 1 to maxCount. Other modes use it to drop model lines with
+// made-up numbers, as Parse does here.
+func Factual(line, input string, maxCount int) bool {
+	allowed := numbers(input)
+	for i := 1; i <= maxCount; i++ {
+		allowed[fmt.Sprint(i)] = true
+	}
+	return numbersAllowed(line, allowed)
+}

@@ -77,9 +77,25 @@ schema AiPitcher:
     extraEnvVars: {str:str} = {}
     labels: {str:str} = {}
 
+    # MODE=incident (#5): a consumer of the alerts/messages streams that
+    # correlates alerts per fingerprint and groups them into incidents.
+    # Off by default.
+    incidentEnabled: bool = False
+    # deployment: one replica, always on (works without KEDA).
+    # scaledjob: a KEDA ScaledJob (KEDA must be installed) that starts a Job
+    # with INCIDENT_RUN=once when the consumer group lags behind.
+    incidentRunAs: "deployment" | "scaledjob" = "deployment"
+    redisAddr: str = "redis-stack.homerun2.svc.cluster.local"
+    redisPort: str = "6379"
+    redisStreams: [str] = ["alerts", "messages"]
+    # Secret key redis-password; in GitOps from SOPS, ESO or a substitution
+    redisPassword: str = ""
+    incidentExtraEnvVars: {str:str} = {}
+
     check:
         name != "", "name must not be empty"
         namespace != "", "namespace must not be empty"
         schedule != "", "schedule must not be empty"
         retries >= 0, "retries must be >= 0"
+        not incidentEnabled or len(redisStreams) > 0, "incident mode needs at least one stream"
 

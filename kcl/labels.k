@@ -27,6 +27,13 @@ _opts = {
     pitcherToken = option("config.pitcherToken")
     openrouterAPIKey = option("config.openrouterAPIKey")
     extraEnvVars = option("config.extraEnvVars")
+    incidentEnabled = option("config.incidentEnabled")
+    incidentRunAs = option("config.incidentRunAs")
+    redisAddr = option("config.redisAddr")
+    redisPort = option("config.redisPort")
+    redisStreams = option("config.redisStreams")
+    redisPassword = option("config.redisPassword")
+    incidentExtraEnvVars = option("config.incidentExtraEnvVars")
 }
 
 config: schema.AiPitcher = schema.AiPitcher {
@@ -74,6 +81,20 @@ config: schema.AiPitcher = schema.AiPitcher {
         openrouterAPIKey = _opts.openrouterAPIKey
     if _opts.extraEnvVars:
         extraEnvVars = _opts.extraEnvVars
+    if _opts.incidentEnabled != None:
+        incidentEnabled = _opts.incidentEnabled in [True, "True", "true"]
+    if _opts.incidentRunAs:
+        incidentRunAs = _opts.incidentRunAs
+    if _opts.redisAddr:
+        redisAddr = _opts.redisAddr
+    if _opts.redisPort:
+        redisPort = str(_opts.redisPort)
+    if _opts.redisStreams:
+        redisStreams = _opts.redisStreams
+    if _opts.redisPassword:
+        redisPassword = _opts.redisPassword
+    if _opts.incidentExtraEnvVars:
+        incidentExtraEnvVars = _opts.incidentExtraEnvVars
 }
 
 commonLabels = {

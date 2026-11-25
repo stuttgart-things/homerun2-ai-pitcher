@@ -34,6 +34,9 @@ var Modes = map[string]Mode{
 	// Once a day: Claude Code over the K8sGPT findings of all clusters in S3
 	// (#12). Reads no scout; settings in Analysis.
 	ClusterAnalysisMode: {Name: ClusterAnalysisMode, Label: "cluster analysis", DigestSchedule: "daily", System: "ai-cluster-analysis"},
+	// A stream consumer (#5): correlates alerts per fingerprint and groups
+	// them into incidents. Reads no scout; settings in Incident.
+	IncidentMode: {Name: IncidentMode, Label: "incident", DigestSchedule: "daily", System: "ai-incident"},
 }
 
 // ModeNames lists the modes, sorted.

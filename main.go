@@ -11,9 +11,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/activity"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/archive"
@@ -21,6 +25,7 @@ import (
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/clusteranalysis"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/config"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/fleetissues"
+	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/incident"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/llm"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/pitch"
 	"github.com/stuttgart-things/homerun2-ai-pitcher/internal/sources"
@@ -46,6 +51,12 @@ func main() {
 	if err != nil {
 		slog.Error("config", "error", err)
 		os.Exit(2)
+	}
+	if cfg.Mode.Name == config.IncidentMode {
+		slog.Info("starting", "version", version, "mode", cfg.Mode.Name, "streams", cfg.Incident.Streams,
+			"group", cfg.Incident.Group, "consumer", cfg.Incident.Consumer, "once", cfg.Incident.Once,
+			"ai", cfg.Incident.AI, "model", cfg.Model, "dryRun", cfg.DryRun)
+		os.Exit(runIncident(cfg))
 	}
 	if cfg.Mode.Name == config.ClusterAnalysisMode {
 		slog.Info("starting", "version", version, "mode", cfg.Mode.Name, "model", cfg.Analysis.ClaudeModel,
@@ -169,6 +180,66 @@ func runClusterAnalysis(cfg *config.Config) int {
 	}
 	slog.Info("pitched", "objectId", id, "title", msg.Title)
 	return 0
+}
+
+// runIncident is MODE=incident (#5): a consumer of the alerts and messages
+// streams that correlates per fingerprint and groups alerts into incidents.
+// It runs until SIGTERM (Deployment) or, with INCIDENT_RUN=once, until the
+// streams are drained (Job). Returns the exit code.
+func runIncident(cfg *config.Config) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	ic := cfg.Incident
+	rdb := redis.NewClient(&redis.Options{Addr: ic.RedisAddr, Password: ic.RedisPassword})
+	defer func() { _ = rdb.Close() }()
+
+	store := &incident.RedisStore{Client: rdb, Prefix: ic.StatePrefix}
+	corOpt := incident.Options{
+		MinOccurrences: ic.MinOccurrences, Cooldown: ic.Cooldown, StaleAfter: ic.StaleAfter, Retention: ic.Retention,
+		System: cfg.System, Author: cfg.Author, Location: ic.Location,
+	}
+	var ai llm.Completer
+	if ic.AI && cfg.OpenRouterAPIKey != "" {
+		// One model call per closed window, capped by INCIDENT_AI_BUDGET:
+		// it must not hold up the stream.
+		ai = &llm.Retrying{
+			Next: &llm.Client{BaseURL: cfg.OpenRouterBaseURL, APIKey: cfg.OpenRouterAPIKey, Model: cfg.Model,
+				MaxTokens: cfg.MaxTokens, Deny: cfg.ModelDeny,
+				// Per model, and the real dial error (#11), as in the digest.
+				RequestTimeout: cfg.LLMTimeout, ModelsPerRequest: cfg.LLMModelsPerRequest,
+				HTTP: llm.NewHTTPClient(cfg.LLMDialNetwork)},
+			Attempts: cfg.LLMRetries + 1, Delay: cfg.LLMRetryDelay,
+		}
+	}
+	var p incident.Pitcher = &pitch.Client{URL: cfg.PitcherURL, Token: cfg.PitcherToken, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	if cfg.DryRun {
+		p = printer{}
+	}
+	r := &incident.Runner{
+		Source:     &incident.RedisSource{Client: rdb, Streams: ic.Streams, Group: ic.Group, Consumer: ic.Consumer, ClaimIdle: ic.ClaimIdle},
+		Correlator: &incident.Correlator{Store: store, Opt: corOpt},
+		Summarizer: &incident.Summarizer{AI: ai, Cor: corOpt, Opt: incident.WindowOptions{
+			Length: ic.Window, Quiet: ic.Quiet, MinKeys: ic.MinAlerts, Language: cfg.Language, AIBudget: ic.AIBudget}},
+		Pitcher: p,
+		Filter:  incident.Filter{ExcludeSystems: ic.ExcludeSystems, Severities: ic.Severities},
+		Batch:   ic.Batch,
+		Block:   ic.Block,
+	}
+	if err := r.Run(ctx, ic.Once); err != nil {
+		slog.Error("incident mode failed", "error", err)
+		return 1
+	}
+	slog.Info("incident mode stopped")
+	return 0
+}
+
+// printer is the Pitcher of a dry run.
+type printer struct{}
+
+func (printer) Pitch(_ context.Context, m pitch.Message) (string, error) {
+	b, _ := json.MarshalIndent(m, "", "  ")
+	fmt.Println(string(b))
+	return "dry-run", nil
 }
 
 // clusterAnalysisMessage is the run's one message: the counts in the title,

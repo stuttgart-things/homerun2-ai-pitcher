@@ -76,11 +76,12 @@ the ticker and the activity; an env var that is set still wins. Each mode runs a
 | `week-ahead` | Mon 07:50 | daily | findings due in the next 7 days, by date | `ai-week-ahead` | no | no |
 | `weekly` | Fri 15:00 | weekly (scout v0.12+) | releases, PRs, outages of the week vs. the week before | `ai-weekly` | yes | yes |
 | `cluster-analysis` | daily 07:30 | `LOOKBACK_DAYS` (7) | findings of the fleet (K8sGPT, endpoint probes, VMs) from S3, by **Claude Code** — see below | `ai-cluster-analysis` | no | no |
+| `incident` | always on (Deployment) or per lag (KEDA ScaledJob) | per alert, windows of 15 min | repeats per fingerprint, alerts that start together — see [Incidents](#incidents-modeincident-5) | `ai-incident` | no | no |
 
 The title says which run it is: `[AI] 24h: …` for morning (unchanged), `[AI evening] …`,
 `[AI week ahead] …`, `[AI weekly] 7d: …`; tags end in the mode (`ai,digest,daily,evening`).
 scout must exclude every pitched system from its digests:
-`DIGEST_EXCLUDE_SYSTEMS=ai-digest,ai-evening,ai-week-ahead,ai-weekly,ai-ticker`.
+`DIGEST_EXCLUDE_SYSTEMS=ai-digest,ai-evening,ai-week-ahead,ai-weekly,ai-ticker,ai-incident`.
 
 ## Cluster analysis (`MODE=cluster-analysis`)
 
@@ -170,6 +171,74 @@ Needs the `claude` CLI in the image: the `-claude` image variant (#13).
 `DRY_RUN=true` builds the report, calls the model and prints report and
 message without storing or pitching.
 
+## Incidents (`MODE=incident`, #5)
+
+A **stream consumer** instead of a CronJob run. It reads the raw bus (`alerts`, `messages`) with its own consumer group, `homerun2-ai-pitcher-incident`, and turns repeats and bursts into a few `info` messages marked AI. It does not read the notification-catcher's output: the patterns are in the raw events, including the repeats.
+
+**How far it acts:** levels 0 and 1 of stuttgart-things/homerun-library#135 (2026-10-22). It reads, correlates and summarises. It never acts on a cluster. The original messages are delivered unchanged, whatever this mode does.
+
+### 1. Correlation per fingerprint, no model
+
+- **Key:** omni-pitcher's `/pitch/alertmanager` tags every alert with `status=firing|resolved,fingerprint=<fp>`, and the fingerprint is the key. Every other message is keyed by `system` plus its title with numbers and ids folded out, so "Pod web-7d9f8c restarted 3 times" and "Pod web-5b2a1e restarted 4 times" share one key.
+- **State per key** lives in Redis (hash `homerun2-ai-pitcher:incident:state`): first seen, last seen, occurrences, clusters (the `cluster` label, else the system, which is the Alertmanager receiver), namespaces, severity and resolved. Because it lives in Redis, a restarted pod or the next Job picks it up.
+- **Repeats:** the first message is the original card and is left alone. From the second occurrence on, the mode sends at most one message per key per `HINT_COOLDOWN` (default 6h), for example:
+  `[AI] NodeClockNotSynchronising: still firing since 2026-11-20 08:00, on 2 clusters, never resolved`
+  The cluster count is taken over every open alert with the same alertname, so the same alert from two Alertmanagers counts as 2 clusters.
+- **Resolved** closes the state. If the mode said something about the key, it adds one `[AI] …: resolved after 13h` message, which also gives the number of alert messages and AI updates. If it fires again, a new episode starts; a key that keeps resolving and firing is reported as `resolved N times before (flapping)`.
+- **Stale:** a key not seen for `INCIDENT_STALE_AFTER` (26h) starts a new episode. Plain messages never resolve, and a silenced alert may not either.
+- **Tags** are `ai,incident,phase=ongoing|resolved|window,key=…`. They never include `status=` or `fingerprint=`, so the catcher does not take the message for an alert.
+
+### 2. Incidents per window, one model call
+
+- Alerts that open an episode go into a window. The window closes 15 min after its first alert (`INCIDENT_WINDOW`) or after 5 quiet minutes (`INCIDENT_QUIET`).
+- At closing, alerts that share an alertname or a cluster/namespace form a group. A group with at least `INCIDENT_MIN_ALERTS` (2) keys becomes one message: `[AI] Incident on sthings-app/shop: 3 alerts within 4m`, followed by the list of alerts.
+- **One model call per window**, not per message, asks for the probable common cause per group.
+  - A line with a number that is not in the input is dropped, as with the ticker. Numbers never come from the model.
+  - **Fail-open:** without a key, with the model down or with no usable line, the deterministic summary goes out alone, marked `[AI n/a]` when the model failed.
+
+### Never its own output
+
+`HINT_EXCLUDE_SYSTEMS` (default `ai-*,scout-digest`) is never correlated. A trailing `*` is a prefix match, so every `ai-*` system is covered: the digests, the tickers, the cluster analysis and this mode's own `ai-incident` messages.
+
+### Run as Deployment or Job
+
+| `INCIDENT_RUN` | Use |
+|---|---|
+| `loop` (default) | a Deployment with 1 replica (`Recreate`): blocks on the streams and closes windows on time. Works without KEDA. |
+| `once` | a Job: drains the streams, waits until the open window has closed, exits. For a KEDA `ScaledJob` with the `redis-streams` trigger on `lagCount` (Redis ≥ 7). `pendingEntriesCount` would only count entries a consumer has already read, so new alerts would never start a Job. |
+
+KCL: `config.incidentEnabled=true` and `config.incidentRunAs=deployment|scaledjob`. Set the Redis password with `config.redisPassword` (Secret key `redis-password`). With `scaledjob`, KEDA must be installed, and the consumer group has to exist before the first trigger: run `XGROUP CREATE <stream> homerun2-ai-pitcher-incident $ MKSTREAM`, or start the Deployment once.
+
+A consumer that dies without acknowledging leaves its entries pending. After `INCIDENT_CLAIM_IDLE` (5m) the next consumer takes them over. Entries are acknowledged after processing even when the pitch failed (fail-open: a lost AI message is better than a backlog). A failed message is not counted against the cooldown, so the next occurrence tries again.
+
+### Measuring it (#135)
+
+The measure is Teams cards per real incident, before and after. Each closed episode logs `incident resolved … cards=<alert messages on the bus> aiMessages=<AI updates>`, and the resolved message repeats both numbers.
+- **Before:** `cards`, which is what the outputs show today, one card per Alertmanager repeat.
+- **After:** the first card, the resolved card and `aiMessages`, once the catcher sends the repeats of a fingerprint elsewhere than Teams, for example via `repeat_interval` or a `match.status` rule. That change is a catcher config change, made in a reviewed PR.
+
+### Settings
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REDIS_ADDR` / `REDIS_PORT` / `REDIS_PASSWORD` | – / `6379` / – | the bus |
+| `INCIDENT_STREAMS` | `alerts,messages` | streams to read; the group is created with `MKSTREAM` from the newest entry on |
+| `INCIDENT_GROUP` / `INCIDENT_CONSUMER` | `homerun2-ai-pitcher-incident` / hostname | consumer group and name |
+| `INCIDENT_RUN` | `loop` | `loop` or `once` |
+| `HINT_EXCLUDE_SYSTEMS` | `ai-*,scout-digest` | never read |
+| `HINT_SEVERITIES` | `error,critical` | severities of **plain** messages that are tracked; alerts are always tracked |
+| `HINT_COOLDOWN` | `6h` | at most one "still firing" per key |
+| `INCIDENT_MIN_OCCURRENCES` | `2` | from which occurrence a key is worth a message |
+| `INCIDENT_STALE_AFTER` / `INCIDENT_RETENTION` | `26h` / `168h` | new episode after silence / forget closed states |
+| `INCIDENT_WINDOW` / `INCIDENT_QUIET` / `INCIDENT_MIN_ALERTS` | `15m` / `5m` / `2` | incident window |
+| `INCIDENT_AI` | `true` | the model call per window (also needs `OPENROUTER_API_KEY`) |
+| `INCIDENT_AI_BUDGET` | `2m` | cap of that call, retries included; split fairly over the model list (`LLM_TIMEOUT` per model, #11), so the stream never waits longer |
+| `INCIDENT_TIMEZONE` | `Europe/Berlin` | times in the messages |
+| `INCIDENT_STATE_PREFIX` | `homerun2-ai-pitcher:incident` | Redis keys of the state |
+| `PITCH_SYSTEM` | `ai-incident` | system of the messages |
+
+`DRY_RUN=true` prints the messages instead of pitching them. It still consumes and keeps state, so use a group of its own (`INCIDENT_GROUP`, `INCIDENT_STATE_PREFIX`) when trying it against the live bus.
+
 ## Activity: what happened in the window
 
 With scout v0.12+ (`/analytics/messages`), each run reads the messages of the digest's window:
@@ -240,7 +309,7 @@ displayRules:
 |---|---|---|
 | `SCOUT_URL` | (required) | scout base URL, e.g. `http://homerun2-scout.homerun2.svc.cluster.local` |
 | `SCOUT_TOKEN` | (required) | scout API bearer token |
-| `MODE` | `morning` | `morning`, `evening`, `week-ahead` or `weekly`, see [Modes](#modes); sets the defaults of `DIGEST_SCHEDULE`, `PITCH_SYSTEM`, `TICKER_ENABLED`, `MESSAGES_ENABLED`, `OUTAGES_ENABLED` |
+| `MODE` | `morning` | `morning`, `evening`, `week-ahead`, `weekly`, `cluster-analysis` or `incident`, see [Modes](#modes); sets the defaults of `DIGEST_SCHEDULE`, `PITCH_SYSTEM`, `TICKER_ENABLED`, `MESSAGES_ENABLED`, `OUTAGES_ENABLED` |
 | `DIGEST_SCHEDULE` | mode's | `hourly`, `daily` or `weekly` (scout v0.12+, needs scout retention ≥ 8 days, 15 for the week before): which scout window |
 | `MESSAGES_ENABLED` | mode's | read the git activity from scout's `/analytics/messages` |
 | `MESSAGES_SYSTEMS` | `homerun2-git-pitcher` | systems whose messages count as git activity |

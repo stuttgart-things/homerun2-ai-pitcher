@@ -44,9 +44,14 @@ type Config struct {
 	OpenRouterBaseURL string
 	OpenRouterAPIKey  string
 	Model             string
-	LLMTimeout        time.Duration
-	MaxTokens         int
-	Language          string
+	// LLMTimeout caps one request: one model with LLMModelsPerRequest=1
+	// (the default), else one group of up to 3 (#11).
+	LLMTimeout          time.Duration
+	LLMModelsPerRequest int
+	// LLMDialNetwork: tcp (IPv4 first, then IPv6), tcp4 or tcp6.
+	LLMDialNetwork string
+	MaxTokens      int
+	Language       string
 	// LLMRetries more tries after a failed model call, LLMRetryDelay before
 	// the first of them (doubled after each).
 	LLMRetries    int
@@ -118,6 +123,7 @@ func Load() (*Config, error) {
 		{"TICKER_MAX", "4", 1, &c.TickerMax},
 		{"TICKER_MAX_CHARS", "40", 10, &c.TickerMaxChars},
 		{"MAX_TITLES", "5", 0, &c.MaxTitles},
+		{"LLM_MODELS_PER_REQUEST", "1", 1, &c.LLMModelsPerRequest},
 	}
 	for _, i := range ints {
 		v, err := strconv.Atoi(getEnv(i.env, i.def))
@@ -154,11 +160,22 @@ func Load() (*Config, error) {
 	}
 	c.MaxTokens = mt
 
-	d, err := time.ParseDuration(getEnv("LLM_TIMEOUT", "90s"))
-	if err != nil {
-		return nil, fmt.Errorf("invalid LLM_TIMEOUT: %w", err)
+	if c.LLMModelsPerRequest > 3 {
+		return nil, fmt.Errorf("invalid LLM_MODELS_PER_REQUEST %d (OpenRouter takes at most 3)", c.LLMModelsPerRequest)
+	}
+	// 30s per model: the free models that answer at all answered within
+	// ~10-40s; the 90s of a group of 3 let one hanging model eat the run.
+	d, err := time.ParseDuration(getEnv("LLM_TIMEOUT", "30s"))
+	if err != nil || d <= 0 {
+		return nil, fmt.Errorf("invalid LLM_TIMEOUT %q", os.Getenv("LLM_TIMEOUT"))
 	}
 	c.LLMTimeout = d
+	c.LLMDialNetwork = getEnv("LLM_DIAL_NETWORK", "tcp")
+	switch c.LLMDialNetwork {
+	case "tcp", "tcp4", "tcp6":
+	default:
+		return nil, fmt.Errorf("LLM_DIAL_NETWORK must be tcp, tcp4 or tcp6, got %q", c.LLMDialNetwork)
+	}
 
 	switch c.DigestSchedule {
 	case "daily", "hourly", "weekly":

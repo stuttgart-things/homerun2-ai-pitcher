@@ -66,7 +66,10 @@ func main() {
 				MaxTokens: cfg.MaxTokens,
 				Deny:      cfg.ModelDeny,
 				MinChars:  minChars,
-				HTTP:      &http.Client{Timeout: cfg.LLMTimeout},
+				// Timeout per request (#11), not on the client.
+				RequestTimeout:   cfg.LLMTimeout,
+				ModelsPerRequest: cfg.LLMModelsPerRequest,
+				HTTP:             llm.NewHTTPClient(cfg.LLMDialNetwork),
 			},
 			Attempts: cfg.LLMRetries + 1,
 			Delay:    cfg.LLMRetryDelay,
@@ -286,7 +289,7 @@ func Run(ctx context.Context, cfg *config.Config, src *sources.Client, ai, ticke
 		slog.Warn("AI summary unavailable, pitching the plain digest", "error", aiErr)
 		out.Summary = summary.Compose(in, "", "", false, aiErr, cfg.System, cfg.Author)
 	} else {
-		slog.Info("AI summary", "model", res.Model, "chars", len(res.Text), "truncated", res.Truncated)
+		slog.Info("AI summary", "model", res.Model, "finishReason", res.FinishReason, "chars", len(res.Text), "truncated", res.Truncated)
 		out.Summary = summary.Compose(in, res.Text, res.Model, res.Truncated, nil, cfg.System, cfg.Author)
 	}
 
@@ -401,7 +404,7 @@ func tickers(ctx context.Context, cfg *config.Config, in summary.Input, user str
 	if len(lines) == 0 {
 		return fallback("no usable line in the answer")
 	}
-	slog.Info("AI ticker", "model", res.Model, "lines", len(lines))
+	slog.Info("AI ticker", "model", res.Model, "finishReason", res.FinishReason, "lines", len(lines))
 	var out []pitch.Message
 	for _, l := range lines {
 		out = append(out, msg(l, "AI-generated ticker (model "+res.Model+")", "ai,ticker"))
@@ -411,10 +414,14 @@ func tickers(ctx context.Context, cfg *config.Config, in summary.Input, user str
 
 // runBudget is the deadline of one run: two model calls (summary, ticker),
 // each with all its retries and back-off, the ticker spacing, and 2 min for
-// the HTTP calls around them.
+// the HTTP calls around them. One try of a call is one request per model
+// group, each with up to LLMTimeout.
 func runBudget(cfg *config.Config) time.Duration {
 	attempts := cfg.LLMRetries + 1
-	perCall := time.Duration(attempts) * cfg.LLMTimeout
+	models := max(modelCount(cfg.Model), modelCount(cfg.TickerModel))
+	per := max(cfg.LLMModelsPerRequest, 1)
+	requests := (models + per - 1) / per
+	perCall := time.Duration(attempts*max(requests, 1)) * cfg.LLMTimeout
 	for i, d := 1, cfg.LLMRetryDelay; i < attempts; i, d = i+1, d*2 {
 		perCall += d
 	}
@@ -423,6 +430,17 @@ func runBudget(cfg *config.Config) time.Duration {
 		calls = 2
 	}
 	return time.Duration(calls)*perCall + time.Duration(cfg.TickerMax)*cfg.TickerDelay + 2*time.Minute
+}
+
+// modelCount counts a comma-separated model list.
+func modelCount(list string) int {
+	n := 0
+	for _, m := range strings.Split(list, ",") {
+		if strings.TrimSpace(m) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 func logLevel() slog.Level {

@@ -126,3 +126,24 @@ func TestLoadModes(t *testing.T) {
 		t.Errorf("unknown mode: err = %v", err)
 	}
 }
+
+func TestLoadLLMTimeoutAndNetwork(t *testing.T) {
+	t.Setenv("SCOUT_URL", "http://scout")
+	t.Setenv("SCOUT_TOKEN", "t")
+	t.Setenv("DRY_RUN", "true")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LLMTimeout.String() != "30s" || c.LLMModelsPerRequest != 1 || c.LLMDialNetwork != "tcp" {
+		t.Errorf("timeout=%v perRequest=%d network=%q", c.LLMTimeout, c.LLMModelsPerRequest, c.LLMDialNetwork)
+	}
+	for env, bad := range map[string]string{"LLM_MODELS_PER_REQUEST": "4", "LLM_DIAL_NETWORK": "udp", "LLM_TIMEOUT": "0s"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv(env, bad)
+			if _, err := Load(); err == nil {
+				t.Errorf("%s=%s: want an error", env, bad)
+			}
+		})
+	}
+}

@@ -5,7 +5,7 @@ go 1.26.6
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/minio/minio-go/v7 v7.4.1
-	github.com/redis/go-redis/v9 v9.24.0
+	github.com/redis/go-redis/v9 v9.24.1
 	go.yaml.in/yaml/v3 v3.0.6
 )
 
